@@ -1,0 +1,20 @@
+{
+  "name": "ai-virtual-reality",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./dist/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc --outDir dist --declaration true",
+    "prestart": "npm run build",
+    "start": "node dist/index.js"
+  },
+  "author": "",
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}
