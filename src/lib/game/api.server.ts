@@ -415,7 +415,7 @@ export async function playerAction(gameID: number, player: Person, history: numb
 	const log_ret = await loadLogs(gameID, player.name, false, history);
 	const logs = log_ret.logs.map(({ time, type, src, msg }) => `[${get_time_str(time)}] [${type}] ${src}: ${msg}`);
 	const system_prompts = [
-		`你现在的身份是一名《模拟人生》的玩家，请你结合下方的日志记录, 将自己带入角色, 做出当前最佳的响应, `,
+		`你是${name}，是一名《模拟人生》的玩家，请你结合下方的日志记录, 将自己带入角色, 做出当前最佳的响应, `,
 		'你的响应必须是下面的命令中的一个或多个, 并且至少包含一个对游戏世界有影响(比如对话/交互)或有反馈(比如查看)的动作, 不能只包含思考之类的无意义内容',
 		'开头写出关键字是必须的, 每个命令独占一行, 参数值不能包含换行, 参数之间用空格隔开: ',
 		...playerActionCmds.map((cmd) => cmd.toString()),
@@ -446,7 +446,7 @@ export async function playerAction(gameID: number, player: Person, history: numb
 		...person_relations,
 	].join('\n');
 	const strong_prompts = [
-		`1. 你不再是一个旁观者，而是直接成为角色本身。所有思考都应以第一人称视角进行，用"我"而不是"${name}"来指代自己`,
+		`1. 你不是一个旁观者，而是角色本身。所有思考都应以第一人称视角进行。`,
 		'2. 思考过程应自然呈现角色的即时心理活动，避免使用分析性语言（如"应该""需要""可能"等）',
 		'3. 你需要根据角色背景深度演绎, 你的思考就是角色的自然内心独白',
 	].join('\n');

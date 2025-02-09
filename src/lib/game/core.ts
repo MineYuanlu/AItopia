@@ -200,6 +200,7 @@ export class GameScene extends Env<GameSceneAttr> {
 		sub_env: Env[] = [],
 		time: number | Date = new Date(),
 		public stage: string = '待开始', // 阶段: 待开始/AI运行中/AI结束/应用中/应用结束
+		public queue: string[] = [], // 队列: 待执行的指令队列
 	) {
 		super(attr.name, attr, obj_static, obj_dynamic, sub_env);
 		this.time = new Date(time);

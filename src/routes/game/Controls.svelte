@@ -56,7 +56,6 @@
 
 		<Button
 			class="w-full text-nowrap border-r-2 px-0"
-			color={auto_run ? 'success-border' : 'white'}
 			onclick={() => {
 				apiGameActionPlayer(1, '莉莉').then((resp) => {
 					console.log(resp, resp?.req.messages[0].content, resp?.resp.message.content);
