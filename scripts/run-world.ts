@@ -168,7 +168,7 @@ function getFallbackAgents(): GeneratedAgent[] {
 // ---------------------------------------------------------------------------
 // 6. Main simulation
 // ---------------------------------------------------------------------------
-async function main() {
+async function main(): Promise<{ world: WorldKernel }> {
 	console.log('🏰 AItopia MVP 0.1 - World Simulation');
 	console.log(`Mode: ${mode} (${mode === 'auto' ? 'auto-running' : 'press Enter to step'})`);
 	console.log('');
@@ -251,13 +251,11 @@ async function main() {
 
 	// Setup graceful shutdown
 	let isRunning = true;
-	process.on('SIGINT', async () => {
-		console.log('\n\n🛑 Shutting down...');
+	let shouldShutdown = false;
+	process.on('SIGINT', () => {
+		console.log('\n\n🛑 SIGINT received, shutting down gracefully...');
+		shouldShutdown = true;
 		isRunning = false;
-		await world.flush();
-		await world.saveSnapshot();
-		console.log('💾 Snapshot saved');
-		process.exit(0);
 	});
 
 	// Main game loop
@@ -312,21 +310,39 @@ async function main() {
 		if (mode === 'step') {
 			// Wait for user input
 			const answer = await prompt('Press Enter to continue (or type "exit" to quit)...');
-			if (answer.trim().toLowerCase() === 'exit') {
+			if (answer.trim().toLowerCase() === 'exit' || shouldShutdown) {
 				isRunning = false;
-				console.log('\n🛑 Exiting...');
-				await world.flush();
-				await world.saveSnapshot();
-				console.log('💾 Snapshot saved');
+				if (shouldShutdown) {
+					console.log('\n🛑 Exiting due to shutdown signal...');
+				} else {
+					console.log('\n🛑 Exiting...');
+				}
 			}
 		} else {
 			// Auto mode: wait between ticks
-			await sleep(tickInterval);
+			if (shouldShutdown) {
+				isRunning = false;
+			} else {
+				await sleep(tickInterval);
+			}
 		}
 	}
+
+	return { world };
 }
 
-main().catch((err) => {
-	console.error('Fatal error:', err);
-	process.exit(1);
-});
+main()
+	.then(async ({ world }) => {
+		// flush + save on normal completion
+		try {
+			await world.flush();
+			await world.saveSnapshot();
+			console.log('💾 Snapshot saved');
+		} catch (e) {
+			console.error('Failed to save snapshot on exit:', e);
+		}
+	})
+	.catch(async (err) => {
+		console.error('Fatal error:', err);
+		process.exit(1);
+	});

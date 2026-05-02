@@ -93,6 +93,19 @@ export class NPCAgent extends Agent {
 		];
 	}
 
+	/** Adjust behavior weights dynamically based on perception. */
+	private getWeightedBehaviors(perception: AgentPerception): Array<{ weight: number; action: () => ActionIntent }> {
+		// If other agents are present, increase SPEAK weight to encourage social interaction
+		const hasOtherAgents = perception.visibleAgents.length > 0;
+		return this.behaviors.map((b, idx) => {
+			// SPEAK is the second behavior (index 1)
+			if (hasOtherAgents && idx === 1) {
+				return { ...b, weight: b.weight * 1.5 };
+			}
+			return b;
+		});
+	}
+
 	async decide(perception: AgentPerception): Promise<ActionIntent | null> {
 		// For MVP: mostly rule-based
 		// Future: if llm exists and rng < llmTriggerChance, use LLM
@@ -115,27 +128,29 @@ export class NPCAgent extends Agent {
 		}
 
 		// Rule-based decision
-		return this.selectWeightedBehavior();
+		return this.selectWeightedBehavior(perception);
 	}
 
-	private selectWeightedBehavior(): ActionIntent {
-		const totalWeight = this.behaviors.reduce((sum, b) => sum + b.weight, 0);
+	private selectWeightedBehavior(perception: AgentPerception): ActionIntent {
+		const behaviors = this.getWeightedBehaviors(perception);
+		const totalWeight = behaviors.reduce((sum, b) => sum + b.weight, 0);
 		let random = this.rng() * totalWeight;
 
-		for (const behavior of this.behaviors) {
+		for (const behavior of behaviors) {
 			random -= behavior.weight;
 			if (random <= 0) {
 				return behavior.action();
 			}
 		}
 
-		return this.behaviors[this.behaviors.length - 1].action();
+		return behaviors[behaviors.length - 1].action();
 	}
 }
 
 // Simple seeded random generator
 function seededRandom(seed: number): () => number {
 	let s = seed;
+	if (s === 0) s = 1;
 	return () => {
 		s = (s * 16807 + 0) % 2147483647;
 		return (s - 1) / 2147483646;

@@ -65,17 +65,25 @@ export abstract class Agent {
 	// Execute: apply the action through WorldKernel
 	protected execute(intent: ActionIntent): void {
 		const { action } = intent;
+		let success = true;
 
 		switch (action.type) {
 			case 'SPEAK':
 				if (action.content) {
-					this.kernel.agentSpeak(this.entityId, action.content);
+					try {
+						this.kernel.agentSpeak(this.entityId, action.content);
+					} catch {
+						success = false;
+					}
 				}
 				break;
 			case 'MOVE':
 				if (action.target) {
-					// For MVP, target is a sceneId directly
-					this.kernel.moveEntity(this.entityId, action.target);
+					try {
+						this.kernel.moveEntity(this.entityId, action.target);
+					} catch {
+						success = false;
+					}
 				}
 				break;
 			case 'WAIT':
@@ -84,6 +92,7 @@ export abstract class Agent {
 				break;
 			default:
 				console.warn(`Unknown action type: ${(action as Record<string, unknown>).type}`);
+				success = false;
 		}
 
 		// Dispatch AGENT_ACTION event
@@ -94,7 +103,7 @@ export abstract class Agent {
 			data: {
 				agentId: this.entityId,
 				action: action,
-				success: true
+				success
 			}
 		});
 	}

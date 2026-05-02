@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 // ============================================================
 // 1. worlds —— World instance
@@ -8,17 +8,13 @@ export const worlds = sqliteTable('worlds', {
 		.primaryKey()
 		.$defaultFn(() => crypto.randomUUID()),
 	name: text('name').notNull(),
-	currentTime: integer('current_time', { mode: 'timestamp' })
+	currentTime: integer('current_time')
 		.notNull()
-		.$defaultFn(() => new Date(0)),
-	createdAt: integer('created_at', { mode: 'timestamp' })
+		.$defaultFn(() => 0),
+	createdAt: integer('created_at')
 		.notNull()
-		.$defaultFn(() => new Date())
+		.$defaultFn(() => Date.now())
 });
-
-// ============================================================
-// 2. scenes —— Scene tree node
-// ============================================================
 export const scenes = sqliteTable('scenes', {
 	id: text('id')
 		.primaryKey()
@@ -26,7 +22,7 @@ export const scenes = sqliteTable('scenes', {
 	worldId: text('world_id')
 		.notNull()
 		.references(() => worlds.id),
-	parentId: text('parent_id').references((): any => scenes.id),
+	parentId: text('parent_id').references((): any => scenes.id, { onDelete: 'set null' }),
 	name: text('name').notNull(),
 	type: text('type', {
 		enum: ['town', 'building', 'room', 'outdoor', 'abstract']
@@ -87,10 +83,10 @@ export const events = sqliteTable('events', {
 	type: text('type').notNull(),
 	agentId: text('agent_id'),
 	data: text('data', { mode: 'json' }).notNull(),
-	createdAt: integer('created_at', { mode: 'timestamp' })
+	createdAt: integer('created_at')
 		.notNull()
-		.$defaultFn(() => new Date())
-});
+		.$defaultFn(() => Date.now())
+}, (table) => [index('events_agent_id_idx').on(table.agentId)]);
 
 // ============================================================
 // 6. agentStates —— Runtime agent state
@@ -130,8 +126,8 @@ export const snapshots = sqliteTable('snapshots', {
 	tickTime: integer('tick_time').notNull(),
 	worldState: text('world_state', { mode: 'json' }).notNull(),
 	eventCount: integer('event_count').notNull(),
-	createdAt: integer('created_at', { mode: 'timestamp' })
+	createdAt: integer('created_at')
 		.notNull()
-		.$defaultFn(() => new Date())
+		.$defaultFn(() => Date.now())
 });
 

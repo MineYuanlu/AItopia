@@ -12,6 +12,8 @@ export class Scheduler {
 	private worldTime: number = 0;
 	private isRunning: boolean = false;
 	private eventBus: EventBus;
+	// executedEvents acts as a ring buffer for recent events only.
+	// The authoritative event count is maintained by the persistent store (DB).
 	private executedEvents: WorldEvent[] = [];
 	private onTickCallback?: (events: WorldEvent[]) => Promise<void> | void;
 
@@ -33,62 +35,87 @@ export class Scheduler {
 	}
 
 	// Execute one tick: process all events at or before current time
+	// Uses isRunning as a mutex to prevent concurrent tick execution
 	tick(): WorldEvent[] {
-		const processedEvents: WorldEvent[] = [];
-
-		// Process all events at or before the current world time
-		while (this.heap.length > 0) {
-			const next = this.peek();
-			if (!next || next.time > this.worldTime) break;
-
-			// Remove from heap
-			const scheduledEvent = this.pop()!;
-
-			// Emit through the event bus - tickTime comes from scheduledEvent.time
-			const worldEvent = this.eventBus.emit({
-				...scheduledEvent.event,
-				tickTime: scheduledEvent.time
-			} as Omit<WorldEvent, 'id' | 'createdAt'>);
-
-			processedEvents.push(worldEvent);
-			this.executedEvents.push(worldEvent);
-
-			// Keep executed events bounded for memory
-			if (this.executedEvents.length > 2000) {
-				this.executedEvents = this.executedEvents.slice(-1000);
-			}
+		if (this.isRunning) {
+			console.warn('Scheduler.tick() called while already running — skipping concurrent tick');
+			return [];
 		}
 
-		// Call the tick callback if any events were processed
-		if (processedEvents.length > 0 && this.onTickCallback) {
-			const result = this.onTickCallback(processedEvents);
-			if (result instanceof Promise) {
-				result.catch((err) => console.warn('Tick callback error:', err));
-			}
-		}
+		this.isRunning = true;
+		try {
+			const processedEvents: WorldEvent[] = [];
 
-		return processedEvents;
+			// Collect all events that should be processed now
+			// (snapshot to avoid heap mutations during callback side-effects)
+			const eventsToProcess: ScheduledEvent[] = [];
+			while (this.heap.length > 0) {
+				const next = this.peek();
+				if (!next || next.time > this.worldTime) break;
+				eventsToProcess.push(this.pop()!);
+			}
+
+			// Process the snapshot — callbacks may call schedule() which
+			// mutates the heap, but that only affects *future* ticks
+			for (const scheduledEvent of eventsToProcess) {
+				// Emit through the event bus - tickTime comes from scheduledEvent.time
+				const worldEvent = this.eventBus.emit({
+					...scheduledEvent.event,
+					tickTime: scheduledEvent.time
+				} as Omit<WorldEvent, 'id' | 'createdAt'>);
+
+				processedEvents.push(worldEvent);
+				this.executedEvents.push(worldEvent);
+
+				// Keep executed events bounded for memory
+				if (this.executedEvents.length > 2000) {
+					this.executedEvents = this.executedEvents.slice(-1000);
+				}
+			}
+
+			// Call the tick callback if any events were processed
+			if (processedEvents.length > 0 && this.onTickCallback) {
+				const result = this.onTickCallback(processedEvents);
+				if (result instanceof Promise) {
+					result.catch((err) => console.warn('Tick callback error:', err));
+				}
+			}
+
+			return processedEvents;
+		} finally {
+			this.isRunning = false;
+		}
 	}
 
-	// Advance world time and execute any events in between
+	// Advance world time by `seconds` and execute any events scheduled
+	// at or before the new target time.
+	//
+	// Semantics: process events in chronological order, jumping time
+	// to each event time, then set to the final target time.
 	advanceTime(seconds: number): WorldEvent[] {
+		if (this.isRunning) {
+			console.warn('Scheduler.advanceTime() called while tick is running — skipping');
+			return [];
+		}
+
 		const targetTime = this.worldTime + seconds;
 		const processedEvents: WorldEvent[] = [];
 
 		// Process all events that would occur before or at the target time
+		// We iterate event-by-event to maintain chronological ordering.
 		while (this.heap.length > 0) {
 			const next = this.peek();
 			if (!next || next.time > targetTime) break;
 
-			// Advance time to the event time
+			// Advance time to the next event's scheduled time
 			this.worldTime = next.time;
 
-			// Process the event via tick
+			// Process all events at this world time via tick()
 			const events = this.tick();
 			processedEvents.push(...events);
 		}
 
-		// Set the final world time
+		// Set the final world time to the target (even if no events fired)
 		this.worldTime = targetTime;
 
 		return processedEvents;
@@ -116,8 +143,13 @@ export class Scheduler {
 		return this.worldTime;
 	}
 
-	// Set world time directly
+	// Set world time directly. Rejects time going backwards to maintain event ordering.
 	setTime(time: number): void {
+		if (time < this.worldTime) {
+			throw new Error(
+				`Cannot set world time backwards: ${time} < ${this.worldTime}`
+			);
+		}
 		this.worldTime = time;
 	}
 

@@ -22,21 +22,31 @@ export class AgentFactory {
 		// 1. Create entity in world
 		const entity = worldKernel.createAgent(generated.名称, sceneId, true);
 
-		// 2. Add components from generated data
-		const components = AgentGenerator.toComponents(generated);
-		for (const component of components) {
-			worldKernel.entityStore.addComponent(entity.id, component);
-		}
+		try {
+			// 2. Add components from generated data
+			const components = AgentGenerator.toComponents(generated);
+			for (const component of components) {
+				worldKernel.entityStore.addComponent(entity.id, component);
+			}
 
-		// 3. Create PlayerAgent instance
-		return new PlayerAgent({
-			id: crypto.randomUUID(),
-			entityId: entity.id,
-			worldId: worldKernel.worldId,
-			kernel: worldKernel,
-			name: generated.名称,
-			llm
-		});
+			// 3. Create PlayerAgent instance
+			return new PlayerAgent({
+				id: crypto.randomUUID(),
+				entityId: entity.id,
+				worldId: worldKernel.worldId,
+				kernel: worldKernel,
+				name: generated.名称,
+				llm
+			});
+		} catch (error) {
+			// Cleanup on failure: remove the created entity and its components
+			try {
+				worldKernel.entityStore.removeEntity(entity.id);
+			} catch {
+				// Best-effort cleanup
+			}
+			throw error;
+		}
 	}
 
 	/**
@@ -51,19 +61,29 @@ export class AgentFactory {
 	): NPCAgent {
 		// Similar to createPlayer but creates NPCAgent
 		const entity = worldKernel.createAgent(generated.名称, sceneId, false);
-		const components = AgentGenerator.toComponents(generated);
-		for (const component of components) {
-			worldKernel.entityStore.addComponent(entity.id, component);
-		}
 
-		return new NPCAgent({
-			id: crypto.randomUUID(),
-			entityId: entity.id,
-			worldId: worldKernel.worldId,
-			kernel: worldKernel,
-			name: generated.名称,
-			llm,
-			seed
-		});
+		try {
+			const components = AgentGenerator.toComponents(generated);
+			for (const component of components) {
+				worldKernel.entityStore.addComponent(entity.id, component);
+			}
+
+			return new NPCAgent({
+				id: crypto.randomUUID(),
+				entityId: entity.id,
+				worldId: worldKernel.worldId,
+				kernel: worldKernel,
+				name: generated.名称,
+				llm,
+				seed
+			});
+		} catch (error) {
+			try {
+				worldKernel.entityStore.removeEntity(entity.id);
+			} catch {
+				// Best-effort cleanup
+			}
+			throw error;
+		}
 	}
 }

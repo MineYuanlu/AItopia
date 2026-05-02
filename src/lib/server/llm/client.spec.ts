@@ -91,10 +91,10 @@ describe('LLMClient', () => {
 
 			await defaultClient.chat({ messages: [{ role: 'user', content: 'Hi' }] });
 
-			const call = mockFetch.mock.calls.at(-1);
-			expect(call[0]).toBe('https://api-ad-ops-prod-advibe.nioint.com/v1/chat/completions');
-			expect(call[1].headers.Authorization).toBe('Bearer ');
-			const body = JSON.parse(call[1].body);
+		const call = mockFetch.mock.calls.at(-1)!;
+		expect(call[0]).toBe('https://api-ad-ops-prod-advibe.nioint.com/v1/chat/completions');
+		expect(call[1].headers.Authorization).toBe('Bearer ');
+		const body = JSON.parse(call[1].body);
 			expect(body.model).toBe('Kimi-K2.6');
 
 			// Restore env
@@ -136,13 +136,13 @@ describe('LLMClient', () => {
 					})
 			});
 
-			await envClient.chat({ messages: [{ role: 'user', content: 'Hi' }] });
+		await envClient.chat({ messages: [{ role: 'user', content: 'Hi' }] });
 
-			const call = mockFetch.mock.calls.at(-1);
-			expect(call[0]).toBe('https://env.api.com/v1/chat/completions');
-			expect(call[1].headers.Authorization).toBe('Bearer env-key');
-			const body = JSON.parse(call[1].body);
-			expect(body.model).toBe('env-model');
+		const call = mockFetch.mock.calls.at(-1)!;
+		expect(call[0]).toBe('https://env.api.com/v1/chat/completions');
+		expect(call[1].headers.Authorization).toBe('Bearer env-key');
+		const body = JSON.parse(call[1].body);
+		expect(body.model).toBe('env-model');
 
 			// Restore env
 			if (originalBase !== undefined) process.env.LLM_API_BASE = originalBase; else delete process.env.LLM_API_BASE;
@@ -193,7 +193,7 @@ describe('LLMClient', () => {
 			expect(response.model).toBe('Kimi-K2.6');
 			expect(response.latency).toBeGreaterThanOrEqual(0);
 
-			const call = mockFetch.mock.calls.at(-1);
+			const call = mockFetch.mock.calls.at(-1)!;
 			const body = JSON.parse(call[1].body);
 			expect(body.messages).toHaveLength(2);
 			expect(body.temperature).toBe(0.5);

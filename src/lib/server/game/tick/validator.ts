@@ -2,7 +2,17 @@ import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import * as schema from '$lib/server/db/schema';
 import type { UUID } from '../types';
-import { WorldKernel } from '../world/world-kernel';
+
+/** Minimal interface for EntityStore dependencies needed by Validator. */
+export interface EntityStoreLike {
+	getEntity(id: UUID): { id: UUID; type: string; sceneId: UUID; name: string } | undefined;
+	getComponent(id: UUID, type: 'Stats'): { energy: number } | undefined;
+}
+
+/** Minimal interface for SceneTree dependencies needed by Validator. */
+export interface SceneTreeLike {
+	getScene(id: UUID): { id: UUID; name: string; exits: Array<{ direction: string; targetSceneId: UUID }> } | undefined;
+}
 
 export interface ValidationResult {
 	valid: boolean;
@@ -18,16 +28,18 @@ export interface ActionIntent {
 }
 
 export class Validator {
-	private worldKernel: WorldKernel;
+	private entityStore: EntityStoreLike;
+	private sceneTree: SceneTreeLike;
 
-	constructor(worldKernel: WorldKernel) {
-		this.worldKernel = worldKernel;
+	constructor(entityStore: EntityStoreLike, sceneTree: SceneTreeLike) {
+		this.entityStore = entityStore;
+		this.sceneTree = sceneTree;
 	}
 
 	// Validate an action intent before execution
 	validateAction(agentId: UUID, action: ActionIntent['action']): ValidationResult {
 		// Check: does agent exist?
-		const entity = this.worldKernel.entityStore.getEntity(agentId);
+		const entity = this.entityStore.getEntity(agentId);
 		if (!entity) {
 			return { valid: false, reason: `Agent not found: ${agentId}` };
 		}
@@ -41,8 +53,8 @@ export class Validator {
 		switch (action.type) {
 			case 'SPEAK': {
 				// Check: can they speak (are they conscious?)
-				const stats = this.worldKernel.entityStore.getComponent(agentId, 'Stats');
-				if (stats && stats.energy <= 0) {
+				const stats = this.entityStore.getComponent(agentId, 'Stats');
+				if (stats && (!Number.isFinite(stats.energy) || stats.energy <= 0)) {
 					return { valid: false, reason: 'Agent is unconscious (energy depleted)' };
 				}
 
@@ -84,12 +96,12 @@ export class Validator {
 
 	// Check if an agent can see/speak to another
 	canCommunicate(agentId: UUID, targetId: UUID): ValidationResult {
-		const agent = this.worldKernel.entityStore.getEntity(agentId);
+		const agent = this.entityStore.getEntity(agentId);
 		if (!agent) {
 			return { valid: false, reason: `Agent not found: ${agentId}` };
 		}
 
-		const target = this.worldKernel.entityStore.getEntity(targetId);
+		const target = this.entityStore.getEntity(targetId);
 		if (!target) {
 			return { valid: false, reason: `Target not found: ${targetId}` };
 		}
@@ -103,8 +115,8 @@ export class Validator {
 		}
 
 		// Check if agent is conscious
-		const stats = this.worldKernel.entityStore.getComponent(agentId, 'Stats');
-		if (stats && stats.energy <= 0) {
+		const stats = this.entityStore.getComponent(agentId, 'Stats');
+		if (stats && (!Number.isFinite(stats.energy) || stats.energy <= 0)) {
 			return { valid: false, reason: 'Agent is unconscious (energy depleted)' };
 		}
 
@@ -113,18 +125,18 @@ export class Validator {
 
 	// Check if scene transition is valid
 	canMove(entityId: UUID, direction: string): ValidationResult {
-		const entity = this.worldKernel.entityStore.getEntity(entityId);
+		const entity = this.entityStore.getEntity(entityId);
 		if (!entity) {
 			return { valid: false, reason: `Entity not found: ${entityId}` };
 		}
 
-		const currentScene = this.worldKernel.sceneTree.getScene(entity.sceneId);
+		const currentScene = this.sceneTree.getScene(entity.sceneId);
 		if (!currentScene) {
 			return { valid: false, reason: `Current scene not found: ${entity.sceneId}` };
 		}
 
 		// Check if there's an exit in that direction
-		const exit = currentScene.exits.find((e) => e.direction === direction);
+		const exit = currentScene.exits?.find((e) => e.direction === direction);
 		if (!exit) {
 			return {
 				valid: false,
@@ -133,14 +145,14 @@ export class Validator {
 		}
 
 		// Check if target scene exists
-		const targetScene = this.worldKernel.sceneTree.getScene(exit.targetSceneId);
+		const targetScene = this.sceneTree.getScene(exit.targetSceneId);
 		if (!targetScene) {
 			return { valid: false, reason: `Target scene not found: ${exit.targetSceneId}` };
 		}
 
 		// Check if entity has energy to move
-		const stats = this.worldKernel.entityStore.getComponent(entityId, 'Stats');
-		if (stats && stats.energy <= 0) {
+		const stats = this.entityStore.getComponent(entityId, 'Stats');
+		if (stats && (!Number.isFinite(stats.energy) || stats.energy <= 0)) {
 			return { valid: false, reason: 'Entity is exhausted (energy depleted)' };
 		}
 

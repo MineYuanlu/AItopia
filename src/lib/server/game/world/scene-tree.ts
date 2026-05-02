@@ -61,7 +61,12 @@ export class SceneTree {
 	getScenePath(id: UUID): string {
 		const parts: string[] = [];
 		let current = this.scenes.get(id);
+		const visited = new Set<UUID>();
 		while (current) {
+			if (visited.has(current.id)) {
+				throw new Error('Scene cycle detected');
+			}
+			visited.add(current.id);
 			parts.unshift(current.name);
 			if (current.parentId) {
 				current = this.scenes.get(current.parentId);
@@ -70,6 +75,16 @@ export class SceneTree {
 			}
 		}
 		return parts.join('/') || '';
+	}
+
+	/** Restore internal state from a snapshot */
+	restoreFromState(state: { scenes: Map<UUID, Scene>; dirtyIds?: UUID[] }): void {
+		this.scenes = new Map(state.scenes);
+		if (state.dirtyIds) {
+			for (const id of state.dirtyIds) {
+				this.dirty.add(id);
+			}
+		}
 	}
 
 	getRootScene(): Scene | undefined {

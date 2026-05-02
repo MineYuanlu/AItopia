@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, asc, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, asc, sql, lt, inArray } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import type { EventType, UUID, WorldEvent } from '../types';
@@ -86,9 +86,7 @@ export class EventLog {
 			conditions.push(eq(schema.events.agentId, options.agentId));
 		}
 		if (options.types !== undefined && options.types.length > 0) {
-			// Drizzle ORM doesn't have a native IN for enums easily;
-			// use sql`IN` for the array of types.
-			conditions.push(sql`${schema.events.type} IN ${options.types}`);
+			conditions.push(inArray(schema.events.type, options.types));
 		}
 
 		const limit = options.limit ?? 100;
@@ -177,7 +175,7 @@ export class EventLog {
 		type: string;
 		agentId: string | null;
 		data: unknown;
-		createdAt: Date;
+		createdAt: number | Date;
 	}): WorldEvent {
 		return {
 			id: row.id,
@@ -186,10 +184,7 @@ export class EventLog {
 			type: row.type as EventType,
 			agentId: row.agentId,
 			data: row.data as Record<string, unknown>,
-			createdAt: row.createdAt.getTime()
+			createdAt: row.createdAt instanceof Date ? row.createdAt.getTime() : Number(row.createdAt)
 		};
 	}
 }
-
-// Helper needed for prune (lt was not imported above) — actually it is needed.
-import { lt } from 'drizzle-orm';

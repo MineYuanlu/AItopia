@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
 import { db } from '$lib/server/db';
 import type {
@@ -65,11 +65,9 @@ export class EntityStore {
 			const compRows = await db
 				.select()
 				.from(schema.components)
-				.where(eq(schema.components.entityId, schema.components.entityId));
+				.where(inArray(schema.components.entityId, entityIds));
 
-			// Filter by entity IDs manually since SQLite doesn't handle IN well with Drizzle in some versions
 			for (const row of compRows) {
-				if (!entityIds.includes(row.entityId)) continue;
 				const comp = this.deserializeComponent(row.type, row.data);
 				if (!comp) continue;
 				const list = this.components.get(row.entityId) ?? [];
@@ -96,6 +94,17 @@ export class EntityStore {
 
 	getEntity(id: UUID): Entity | undefined {
 		return this.entities.get(id);
+	}
+
+	removeEntity(id: UUID): void {
+		this.entities.delete(id);
+		this.components.delete(id);
+		this.dirty.delete(id);
+		this.dirtyComponents.delete(id);
+		// Also remove from DB (if already synced)
+		db.delete(schema.entities).where(eq(schema.entities.id, id)).catch(() => {
+			// Best-effort DB cleanup, ignore errors
+		});
 	}
 
 	moveEntity(entityId: UUID, targetSceneId: UUID): void {
@@ -133,6 +142,27 @@ export class EntityStore {
 
 	getComponents(entityId: UUID): Component[] {
 		return this.components.get(entityId) ?? [];
+	}
+
+	/** Restore internal state from a snapshot */
+	restoreFromState(state: {
+		entities: Map<UUID, Entity>;
+		components: Map<UUID, Component[]>;
+		dirtyIds?: UUID[];
+		dirtyComponentIds?: UUID[];
+	}): void {
+		this.entities = new Map(state.entities);
+		this.components = new Map(state.components);
+		if (state.dirtyIds) {
+			for (const id of state.dirtyIds) {
+				this.dirty.add(id);
+			}
+		}
+		if (state.dirtyComponentIds) {
+			for (const id of state.dirtyComponentIds) {
+				this.dirtyComponents.add(id);
+			}
+		}
 	}
 
 	removeComponent(entityId: UUID, type: string): void {

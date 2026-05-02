@@ -124,7 +124,7 @@ describe('NPCAgent', () => {
 		const iterations = 1000;
 
 		for (let i = 0; i < iterations; i++) {
-			const result = agent['selectWeightedBehavior']();
+			const result = agent['selectWeightedBehavior']({ currentScene: {}, visibleAgents: [], visibleItems: [] } as any);
 			counts[result.action.type]++;
 		}
 

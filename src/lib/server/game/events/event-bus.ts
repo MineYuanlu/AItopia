@@ -48,11 +48,14 @@ export class EventBus {
 	emit(event: EventInput): WorldEvent {
 		const fullEvent: WorldEvent = {
 			...event,
-			tickTime: event.tickTime ?? Date.now() * 0.001, // Default to current time if not set
+			tickTime: event.tickTime !== undefined ? event.tickTime : Date.now() * 0.001, // Default to current time if not set
 			id: crypto.randomUUID(),
 			worldId: this.worldId,
 			createdAt: Date.now()
 		};
+
+		let handlerFailed = false;
+		let lastError: unknown;
 
 		// Call type-specific handlers (synchronously for now)
 		const typeHandlers = this.handlers.get(fullEvent.type);
@@ -61,9 +64,13 @@ export class EventBus {
 				try {
 					const result = handler(fullEvent);
 					if (result instanceof Promise) {
-						result.catch((err) => console.warn('Event handler error:', err));
+						result.catch((err) => {
+							console.warn('Event handler async error:', err);
+						});
 					}
 				} catch (err) {
+					handlerFailed = true;
+					lastError = err;
 					console.warn('Event handler error:', err);
 				}
 			}
@@ -74,19 +81,30 @@ export class EventBus {
 			try {
 				const result = handler(fullEvent);
 				if (result instanceof Promise) {
-					result.catch((err) => console.warn('Any-event handler error:', err));
+					result.catch((err) => {
+						console.warn('Any-event handler async error:', err);
+					});
 				}
 			} catch (err) {
+				handlerFailed = true;
+				lastError = err;
 				console.warn('Any-event handler error:', err);
 			}
 		}
 
-		// Queue for DB persistence
+		// Queue for DB persistence regardless of handler success
+		// (Event happened even if handler failed)
 		this.pendingEvents.push(fullEvent);
 
 		// Keep in-memory buffer bounded
 		if (this.pendingEvents.length > 1000) {
 			this.pendingEvents.shift();
+		}
+
+		// If any handler failed, log it but still return the event
+		// Callers should not rely on exceptions to detect handler failures
+		if (handlerFailed) {
+			console.warn(`Event emitted but some handlers failed for type: ${fullEvent.type}`, lastError);
 		}
 
 		return fullEvent;
@@ -96,14 +114,17 @@ export class EventBus {
 	async flush(): Promise<void> {
 		if (this.pendingEvents.length === 0) return;
 
-		// Delegate to EventLog for batch insertion
-		const stripped = this.pendingEvents.map((ev) => {
+		// Capture batch and immediately clear the queue
+		// to prevent events emitted during the await from being lost
+		const batch = this.pendingEvents;
+		this.pendingEvents = [];
+
+		// Strip auto-generated fields before delegation to EventLog
+		const stripped = batch.map((ev) => {
 			const { id, createdAt, ...rest } = ev;
 			return rest;
 		});
 		await this.eventLog.appendMany(stripped);
-
-		this.pendingEvents = [];
 	}
 
 	// Load events from DB for replay

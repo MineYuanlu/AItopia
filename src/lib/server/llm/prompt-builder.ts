@@ -5,12 +5,39 @@
 import type { LLMRequest, LLMMessage } from './client';
 import type { AgentPerception } from '../game/types';
 
+const VALID_AGENT_TYPES = ['str', 'number', 'str_arr', 'arr'] as const;
+type ValidAgentType = (typeof VALID_AGENT_TYPES)[number];
+
 /**
  * Field descriptor for attribute definitions.
  * Mirrors the AttrDesc pattern from chat-prompt.md:
  * [type, example, description, range]
  */
-type FieldDesc = readonly [string, unknown, string, string];
+type FieldDesc = readonly [ValidAgentType, unknown, string, string];
+
+/** Validate a field descriptor for basic sanity. */
+function validateFieldDesc(key: string, desc: FieldDesc): void {
+	const [type, example, info, range] = desc;
+	if (!VALID_AGENT_TYPES.includes(type)) {
+		throw new Error(`Invalid field type for "${key}": ${type}`);
+	}
+	if (typeof info !== 'string' || info.length === 0) {
+		throw new Error(`Invalid field description for "${key}"`);
+	}
+	if (typeof range !== 'string' || range.length === 0) {
+		throw new Error(`Invalid field range for "${key}"`);
+	}
+	// Basic type consistency check
+	if (type === 'str' && typeof example !== 'string') {
+		throw new Error(`Example for "${key}" must be a string`);
+	}
+	if (type === 'number' && typeof example !== 'number') {
+		throw new Error(`Example for "${key}" must be a number`);
+	}
+	if ((type === 'str_arr' || type === 'arr') && !Array.isArray(example)) {
+		throw new Error(`Example for "${key}" must be an array`);
+	}
+}
 
 /** Agent attribute descriptor map. */
 const agentFields: Record<string, FieldDesc> = {
@@ -56,6 +83,9 @@ const agentFields: Record<string, FieldDesc> = {
 	]
 } as const;
 
+// Runtime validation of agentFields
+Object.entries(agentFields).forEach(([key, desc]) => validateFieldDesc(key, desc as FieldDesc));
+
 function formatFieldPrompt(fields: Record<string, FieldDesc>): string {
 	return Object.entries(fields)
 		.map(
@@ -90,6 +120,12 @@ export class PromptBuilder {
 			`新创建的玩家将以'搬入新的合租房间'的方式来到游戏中，玩家创建后会立马开始搬到新家的剧情，你需要在情绪或记忆中体现这点。`,
 			`用户设定背景: ${context}`,
 			'',
+			'约束与规则：',
+			'- 不能执行物理上不可能的动作（如穿墙、瞬间移动）。',
+			'- 行动必须符合当前场景的空间约束（如房间只有特定出口才能离开）。',
+			'- 不要生成重复或无意义的动作（如连续多次做完全相同的事）。',
+			'- 如果体力值为0或以下，你只能选择 WAIT 或 THINK。',
+			'',
 			'以下是各个字段的详细说明：',
 			formatFieldPrompt(agentFields)
 		].join('\n');
@@ -105,7 +141,7 @@ export class PromptBuilder {
 				{ role: 'user', content: userContent }
 			],
 			model: undefined,
-			temperature: 2,
+			temperature: 0.9,
 			responseFormat: { type: 'json_object' }
 		};
 	}
@@ -156,7 +192,15 @@ export class PromptBuilder {
 				},
 				null,
 				2
-			)
+			),
+			'',
+			'注意：',
+			'- action.type 必须是以下四种之一：SPEAK（说话）、MOVE（移动）、WAIT（等待）、THINK（思考）。',
+			'- MOVE 时，target 必须是当前场景存在的出口方向。',
+			'- SPEAK 时，content 为你所说的话，target（可选）为说话对象的名字。',
+			'- THINK 时，content 为你的思考内容。',
+			'- WAIT 不需要 target 或 content。',
+			'- timeAdvanceSeconds 表示此动作预计耗时（秒），取值范围 0 到 3600。'
 		].join('\n');
 
 		return {

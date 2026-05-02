@@ -46,7 +46,7 @@ export class WorldKernel {
 		await db.insert(schema.worlds).values({
 			id: worldId,
 			name: worldName,
-			currentTime: new Date(0)
+			currentTime: 0
 		});
 
 		const kernel = new WorldKernel(worldId);
@@ -71,6 +71,32 @@ export class WorldKernel {
 		return kernel;
 	}
 
+	static async loadFromSnapshot(worldId: UUID, snapshotId: UUID): Promise<WorldKernel> {
+		const kernel = new WorldKernel(worldId);
+		const snapshot = await kernel.snapshotManager.restore(snapshotId);
+		if (!snapshot) {
+			throw new Error(`Snapshot not found: ${snapshotId}`);
+		}
+
+		kernel.currentTime = snapshot.currentTime;
+		// Restore scenes
+		kernel.sceneTree.restoreFromState({
+			scenes: new Map(snapshot.scenes as Map<UUID, Scene>),
+			dirtyIds: Array.from(snapshot.scenes.keys()) as UUID[]
+		});
+		// Restore entities
+		kernel.entityStore.restoreFromState({
+			entities: new Map(snapshot.entities as Map<UUID, Entity>),
+			components: new Map(snapshot.components as Map<UUID, Component[]>),
+			dirtyIds: Array.from(snapshot.entities.keys()) as UUID[],
+			dirtyComponentIds: Array.from(snapshot.components.keys()) as UUID[]
+		});
+
+		await kernel.flush();
+		return kernel;
+	}
+
+	/** Load a world from DB by ID */
 	static async load(worldId: UUID): Promise<WorldKernel> {
 		// Verify world exists
 		const worldRows = await db.select().from(schema.worlds).where(eq(schema.worlds.id, worldId));
@@ -81,38 +107,10 @@ export class WorldKernel {
 
 		const kernel = new WorldKernel(worldId);
 		// Restore time from DB
-		kernel.currentTime = Math.floor(worldRow.currentTime.getTime() / 1000);
+		kernel.currentTime = worldRow.currentTime;
 
 		await kernel.entityStore.loadFromDB();
 		await kernel.sceneTree.loadFromDB();
-		return kernel;
-	}
-
-	static async loadFromSnapshot(worldId: UUID, snapshotId: UUID): Promise<WorldKernel> {
-		const kernel = new WorldKernel(worldId);
-		const snapshot = await kernel.snapshotManager.restore(snapshotId);
-		if (!snapshot) {
-			throw new Error(`Snapshot not found: ${snapshotId}`);
-		}
-
-		kernel.currentTime = snapshot.currentTime;
-		// Restore scenes
-		for (const [id, scene] of snapshot.scenes) {
-			kernel.sceneTree['scenes'].set(id, scene as Scene);
-			kernel.sceneTree['dirty'].add(id);
-		}
-		// Restore entities
-		for (const [id, entity] of snapshot.entities) {
-			kernel.entityStore['entities'].set(id, entity as Entity);
-			kernel.entityStore['dirty'].add(id);
-		}
-		// Restore components
-		for (const [id, comps] of snapshot.components) {
-			kernel.entityStore['components'].set(id, comps as Component[]);
-			kernel.entityStore['dirtyComponents'].add(id);
-		}
-
-		await kernel.flush();
 		return kernel;
 	}
 
@@ -174,7 +172,7 @@ export class WorldKernel {
 		return entity;
 	}
 
-	moveEntity(entityId: UUID, targetSceneId: UUID): void {
+	moveEntity(entityId: UUID, targetSceneId: UUID, direction?: string): void {
 		const entity = this.entityStore.getEntity(entityId);
 		if (!entity) throw new Error(`Entity not found: ${entityId}`);
 		if (!this.sceneTree.getScene(targetSceneId)) {
@@ -188,7 +186,7 @@ export class WorldKernel {
 			type: 'MOVE',
 			tickTime: this.currentTime,
 			agentId: entityId,
-			data: { entityId, fromSceneId, toSceneId: targetSceneId, direction: 'unknown' }
+			data: { entityId, fromSceneId, toSceneId: targetSceneId, direction: direction ?? 'unknown' }
 		});
 	}
 
@@ -289,7 +287,7 @@ export class WorldKernel {
 		// Flush world time
 		await db
 			.update(schema.worlds)
-			.set({ currentTime: new Date(this.currentTime * 1000) })
+			.set({ 			currentTime: this.currentTime })
 			.where(eq(schema.worlds.id, this.worldId));
 
 		// Flush events via EventBus
@@ -306,6 +304,15 @@ export class WorldKernel {
 	private validateEvent(event: Omit<WorldEvent, 'id' | 'worldId' | 'createdAt'>): void {
 		if (!event.type) throw new Error('Event type is required');
 		if (event.tickTime < 0) throw new Error('Tick time cannot be negative');
+		if (event.agentId !== null && event.agentId !== undefined) {
+			const entity = this.entityStore.getEntity(event.agentId);
+			if (!entity) throw new Error(`Event references unknown agent: ${event.agentId}`);
+		}
+		if (event.tickTime < this.currentTime) {
+			throw new Error(
+				`Event tickTime ${event.tickTime} is before current world time ${this.currentTime}`
+			);
+		}
 	}
 
 	private applyEvent(event: Omit<WorldEvent, 'id' | 'worldId' | 'createdAt'>): void {
@@ -330,15 +337,18 @@ export class WorldKernel {
 				this.entityStore.addComponent(entityId, component);
 				break;
 			}
-			case 'AGENT_ACTION': {
-				const { action } = event.data as {
-					action: { type: string; target?: string; content?: string };
-				};
-				if (action.type === 'MOVE' && action.target && event.agentId) {
-					this.entityStore.moveEntity(event.agentId, action.target);
+		case 'AGENT_ACTION': {
+			const { action } = event.data as {
+				action: { type: string; target?: string; content?: string };
+			};
+			if (action.type === 'MOVE' && action.target && event.agentId) {
+				if (!this.sceneTree.getScene(action.target)) {
+					throw new Error(`AGENT_ACTION MOVE target scene not found: ${action.target}`);
 				}
-				break;
+				this.entityStore.moveEntity(event.agentId, action.target);
 			}
+			break;
+		}
 			case 'ENTITY_CREATED':
 			case 'MOVE':
 			case 'SPEAK':

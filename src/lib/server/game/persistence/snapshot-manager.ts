@@ -40,7 +40,7 @@ export class SnapshotManager {
 			tickTime: worldState.currentTime,
 			worldState: serializedState,
 			eventCount,
-			createdAt: new Date(now)
+			createdAt: now
 		});
 
 		this.lastSnapshotEventCount = eventCount;
@@ -103,7 +103,7 @@ export class SnapshotManager {
 		return rows.map((row) => ({
 			id: row.id,
 			tickTime: row.tickTime,
-			createdAt: row.createdAt.getTime()
+			createdAt: row.createdAt
 		}));
 	}
 
@@ -121,7 +121,7 @@ export class SnapshotManager {
 		const snapshot = await this.load(snapshotId);
 		if (!snapshot) return null;
 
-		return this.deserializeWorldState(snapshot.worldState as unknown as Record<string, unknown>);
+		return snapshot.worldState;
 	}
 
 	/**
@@ -149,6 +149,12 @@ export class SnapshotManager {
 	}
 
 	private deserializeWorldState(data: Record<string, unknown>): WorldState {
+		if (typeof data.id !== 'string') throw new Error('Snapshot missing id field');
+		if (typeof data.currentTime !== 'number') throw new Error('Snapshot missing currentTime field');
+		if (!Array.isArray(data.scenes)) throw new Error('Snapshot missing/invalid scenes field');
+		if (!Array.isArray(data.entities)) throw new Error('Snapshot missing/invalid entities field');
+		if (!Array.isArray(data.components)) throw new Error('Snapshot missing/invalid components field');
+
 		return {
 			id: data.id as UUID,
 			currentTime: data.currentTime as number,
@@ -164,7 +170,7 @@ export class SnapshotManager {
 		tickTime: number;
 		worldState: unknown;
 		eventCount: number;
-		createdAt: Date;
+		createdAt: number;
 	}): Snapshot {
 		const worldState = this.deserializeWorldState(row.worldState as Record<string, unknown>);
 
@@ -174,7 +180,7 @@ export class SnapshotManager {
 			tickTime: row.tickTime,
 			worldState,
 			eventCount: row.eventCount,
-			createdAt: row.createdAt.getTime()
+			createdAt: row.createdAt
 		};
 	}
 }
