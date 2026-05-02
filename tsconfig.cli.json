@@ -1,0 +1,13 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"$lib": ["./src/lib"],
+			"$lib/*": ["./src/lib/*"],
+			"$env/dynamic/private": ["./scripts/mocks/$env/dynamic/private.ts"],
+			"$app/*": ["./scripts/mocks/$app/*"]
+		}
+	},
+	"include": ["scripts/**/*.ts", "src/lib/server/**/*.ts"]
+}
