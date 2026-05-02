@@ -37,8 +37,20 @@ export default defineConfig(
 		}
 	},
 	{
-		// Override or add rule settings here, such as:
-		// 'svelte/button-has-type': 'error'
-		rules: {}
+		linterOptions: {
+			reportUnusedDisableDirectives: false
+		},
+		rules: {
+			'@typescript-eslint/no-explicit-any': 'off',
+			'svelte/no-navigation-without-resolve': 'warn',
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{
+					varsIgnorePattern: '^_',
+					argsIgnorePattern: '^_',
+					caughtErrorsIgnorePattern: '^_'
+				}
+			]
+		}
 	}
 );
