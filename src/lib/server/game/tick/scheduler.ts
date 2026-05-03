@@ -10,7 +10,7 @@ interface ScheduledEvent {
 export class Scheduler {
 	private heap: ScheduledEvent[] = []; // Min-heap by (time, priority)
 	private worldTime: number = 0;
-	private isRunning: boolean = false;
+	private runningDepth: number = 0; // Re-entrant call counter
 	private eventBus: EventBus;
 	// executedEvents acts as a ring buffer for recent events only.
 	// The authoritative event count is maintained by the persistent store (DB).
@@ -35,14 +35,14 @@ export class Scheduler {
 	}
 
 	// Execute one tick: process all events at or before current time
-	// Uses isRunning as a mutex to prevent concurrent tick execution
+	// Uses runningDepth as a re-entrant counter to prevent concurrent tick execution
 	tick(): WorldEvent[] {
-		if (this.isRunning) {
+		if (this.runningDepth > 0) {
 			console.warn('Scheduler.tick() called while already running — skipping concurrent tick');
 			return [];
 		}
 
-		this.isRunning = true;
+		this.runningDepth++;
 		try {
 			const processedEvents: WorldEvent[] = [];
 
@@ -83,7 +83,7 @@ export class Scheduler {
 
 			return processedEvents;
 		} finally {
-			this.isRunning = false;
+			this.runningDepth--;
 		}
 	}
 
@@ -93,7 +93,7 @@ export class Scheduler {
 	// Semantics: process events in chronological order, jumping time
 	// to each event time, then set to the final target time.
 	advanceTime(seconds: number): WorldEvent[] {
-		if (this.isRunning) {
+		if (this.runningDepth > 0) {
 			console.warn('Scheduler.advanceTime() called while tick is running — skipping');
 			return [];
 		}

@@ -4,9 +4,12 @@ import Database from 'better-sqlite3';
 import * as schema from './schema';
 import { env } from '$env/dynamic/private';
 import { config } from 'dotenv';
+import { resolve } from 'path';
 
-// Load .env for test environments where SvelteKit hasn't set up $env/dynamic/private
-config({ path: '.env' });
+// Load .env for test environments where SvelteKit hasn't set up $env/dynamic/private.
+// Prefer process.env directly since $env/dynamic/private may not see dotenv results
+// in some build/test contexts.
+config({ path: resolve(process.cwd(), '.env') });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DbInstance = BetterSQLite3Database<any>;
@@ -16,8 +19,8 @@ let dbInstance: DbInstance | null = null;
 
 export function getDb(): DbInstance {
 	if (!dbInstance) {
-		// Try DATABASE_URL from various sources
-		const dbUrl = env.DATABASE_URL || process.env.DATABASE_URL;
+		// Priority: process.env (set by CLI/test runner first), then $env/dynamic/private fallback
+		const dbUrl = process.env.DATABASE_URL || env.DATABASE_URL;
 		if (!dbUrl) {
 			throw new Error('DATABASE_URL is not set');
 		}

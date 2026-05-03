@@ -49,7 +49,7 @@ export abstract class Agent {
 		}
 
 		// 4. Execute the action through WorldKernel
-		this.execute(intent);
+		await this.execute(intent);
 
 		return intent;
 	}
@@ -63,7 +63,7 @@ export abstract class Agent {
 	abstract decide(perception: AgentPerception): Promise<ActionIntent | null>;
 
 	// Execute: apply the action through WorldKernel
-	protected execute(intent: ActionIntent): void {
+	protected async execute(intent: ActionIntent): Promise<void> {
 		const { action } = intent;
 		let success = true;
 
@@ -72,7 +72,8 @@ export abstract class Agent {
 				if (action.content) {
 					try {
 						this.kernel.agentSpeak(this.entityId, action.content);
-					} catch {
+					} catch (err) {
+						console.error(`Agent ${this.name} SPEAK failed:`, err);
 						success = false;
 					}
 				}
@@ -81,7 +82,18 @@ export abstract class Agent {
 				if (action.target) {
 					try {
 						this.kernel.moveEntity(this.entityId, action.target);
-					} catch {
+					} catch (err) {
+						console.error(`Agent ${this.name} MOVE failed:`, err);
+						success = false;
+					}
+				}
+				break;
+			case 'INTERACT':
+				if (action.target) {
+					try {
+						this.kernel.interactEntity(this.entityId, action.target, action.content);
+					} catch (err) {
+						console.error(`Agent ${this.name} INTERACT failed:`, err);
 						success = false;
 					}
 				}

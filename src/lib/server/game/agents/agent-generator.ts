@@ -1,9 +1,20 @@
 /**
  * Agent generator — uses LLM to create characters with rich personalities.
  */
-import { LLMClient } from '../../llm/client';
+import { LLMClient, LLMJsonParseError } from '../../llm/client';
 import { PromptBuilder } from '../../llm/prompt-builder';
 import type { Component, StatsComponent, PersonalityComponent, MemoryComponent, RelationComponent } from '../../game/types';
+
+export class AgentGenerationError extends Error {
+	constructor(
+		message: string,
+		public readonly stage: 'llm_call' | 'json_parse' | 'validation',
+		public readonly cause?: unknown
+	) {
+		super(message);
+		this.name = 'AgentGenerationError';
+	}
+}
 
 export interface GeneratedAgent {
 	名称: string;
@@ -61,16 +72,18 @@ export class AgentGenerator {
 			const { data } = await this.llm.chatJSON<AgentGenerationResult>(request);
 			resultData = data;
 		} catch (err) {
-			throw new Error(
-				`Agent generation failed: ${err instanceof Error ? err.message : String(err)}\n` +
-					`Context: count=${count}, context=${context ?? 'default'}`
+			const stage = err instanceof LLMJsonParseError ? 'json_parse' : 'llm_call';
+			throw new AgentGenerationError(
+				`Agent generation failed at ${stage}: ${err instanceof Error ? err.message : String(err)}`,
+				stage,
+				err
 			);
 		}
 
 		if (!Array.isArray(resultData.result)) {
-			throw new Error(
-				`Agent generation returned invalid result structure: ` +
-					`expected "result" to be an array, got ${typeof resultData.result}`
+			throw new AgentGenerationError(
+				`Agent generation returned invalid result structure: expected "result" to be an array, got ${typeof resultData.result}`,
+				'validation'
 			);
 		}
 
@@ -81,7 +94,56 @@ export class AgentGenerator {
 			);
 		}
 
-		return resultData.result;
+		const stringFields: (keyof GeneratedAgent)[] = ['名称', '性别', '生日', '职业', '情绪', '身世'];
+		const numberFields: (keyof GeneratedAgent)[] = ['身高', '体重', '智商', '体力', '智慧', '幸运'];
+		const validatedAgents: GeneratedAgent[] = [];
+
+		for (let i = 0; i < resultData.result.length; i++) {
+			const agent = resultData.result[i];
+			const missing: string[] = [];
+
+			for (const field of stringFields) {
+				if (typeof agent[field] !== 'string' || (agent[field] as string).trim().length === 0) {
+					missing.push(`${String(field)}(string)`);
+				}
+			}
+
+			for (const field of numberFields) {
+				if (typeof agent[field] !== 'number' || Number.isNaN(agent[field])) {
+					missing.push(`${String(field)}(number)`);
+				}
+			}
+
+			if (missing.length > 0) {
+				throw new AgentGenerationError(
+					`Agent #${i + 1} validation failed: missing or invalid fields: ${missing.join(', ')}`,
+					'validation'
+				);
+			}
+
+			if (!Array.isArray(agent.性格)) {
+				agent.性格 = [];
+			}
+			if (!Array.isArray(agent.爱好)) {
+				agent.爱好 = [];
+			}
+			if (!Array.isArray(agent.技能)) {
+				agent.技能 = [];
+			}
+			if (!Array.isArray(agent.大记忆)) {
+				agent.大记忆 = [];
+			}
+			if (!Array.isArray(agent.小记忆)) {
+				agent.小记忆 = [];
+			}
+			if (!Array.isArray(agent.关系)) {
+				agent.关系 = [];
+			}
+
+			validatedAgents.push(agent);
+		}
+
+		return validatedAgents;
 	}
 
 	/**

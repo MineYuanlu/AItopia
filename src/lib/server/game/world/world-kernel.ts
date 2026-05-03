@@ -78,18 +78,32 @@ export class WorldKernel {
 			throw new Error(`Snapshot not found: ${snapshotId}`);
 		}
 
+		// Helper to safely restore a Map from a potentially serialized object
+		const restoreMap = <K, V>(input: unknown): Map<K, V> => {
+			if (input instanceof Map) {
+				return new Map(input);
+			}
+			if (input && typeof input === 'object') {
+				return new Map(Object.entries(input as Record<string, V>)) as unknown as Map<K, V>;
+			}
+			return new Map<K, V>();
+		};
+
 		kernel.currentTime = snapshot.currentTime;
 		// Restore scenes
+		const scenesMap = restoreMap<UUID, Scene>(snapshot.scenes);
 		kernel.sceneTree.restoreFromState({
-			scenes: new Map(snapshot.scenes as Map<UUID, Scene>),
-			dirtyIds: Array.from(snapshot.scenes.keys()) as UUID[]
+			scenes: scenesMap,
+			dirtyIds: Array.from(scenesMap.keys()) as UUID[]
 		});
 		// Restore entities
+		const entitiesMap = restoreMap<UUID, Entity>(snapshot.entities);
+		const componentsMap = restoreMap<UUID, Component[]>(snapshot.components);
 		kernel.entityStore.restoreFromState({
-			entities: new Map(snapshot.entities as Map<UUID, Entity>),
-			components: new Map(snapshot.components as Map<UUID, Component[]>),
-			dirtyIds: Array.from(snapshot.entities.keys()) as UUID[],
-			dirtyComponentIds: Array.from(snapshot.components.keys()) as UUID[]
+			entities: entitiesMap,
+			components: componentsMap,
+			dirtyIds: Array.from(entitiesMap.keys()) as UUID[],
+			dirtyComponentIds: Array.from(componentsMap.keys()) as UUID[]
 		});
 
 		await kernel.flush();
@@ -205,6 +219,18 @@ export class WorldKernel {
 		});
 	}
 
+	interactEntity(agentId: UUID, targetName: string, interaction?: string): void {
+		const entity = this.entityStore.getEntity(agentId);
+		if (!entity) throw new Error(`Entity not found: ${agentId}`);
+
+		this.dispatch({
+			type: 'AGENT_ACTION',
+			tickTime: this.currentTime,
+			agentId,
+			data: { agentId, action: { type: 'INTERACT', target: targetName, content: interaction } }
+		});
+	}
+
 	/** Get agent's perception of the world */
 	getAgentPerception(agentId: UUID): AgentPerception {
 		const entity = this.entityStore.getEntity(agentId);
@@ -317,18 +343,19 @@ export class WorldKernel {
 
 	private applyEvent(event: Omit<WorldEvent, 'id' | 'worldId' | 'createdAt'>): void {
 		switch (event.type) {
-			case 'SCENE_CHANGE': {
-				const { sceneId, updates } = event.data as {
-					sceneId: UUID;
-					updates: Partial<Scene>;
-				};
-				const scene = this.sceneTree.getScene(sceneId);
-				if (scene) {
-					Object.assign(scene, updates);
-					this.sceneTree['dirty'].add(sceneId);
-				}
-				break;
+		case 'SCENE_CHANGE': {
+			const { sceneId, updates } = event.data as {
+				sceneId: UUID;
+				updates: Partial<Scene>;
+			};
+			const scene = this.sceneTree.getScene(sceneId);
+			if (!scene) {
+				throw new Error(`SCENE_CHANGE references unknown scene: ${sceneId}`);
 			}
+			Object.assign(scene, updates);
+			this.sceneTree['dirty'].add(sceneId);
+			break;
+		}
 			case 'COMPONENT_ADDED': {
 				const { entityId, component } = event.data as {
 					entityId: UUID;
@@ -342,10 +369,26 @@ export class WorldKernel {
 				action: { type: string; target?: string; content?: string };
 			};
 			if (action.type === 'MOVE' && action.target && event.agentId) {
-				if (!this.sceneTree.getScene(action.target)) {
+				// Validate target scene exists and there is an exit from current scene
+				const entity = this.entityStore.getEntity(event.agentId);
+				if (!entity) {
+					throw new Error(`AGENT_ACTION MOVE references unknown entity: ${event.agentId}`);
+				}
+				const currentScene = this.sceneTree.getScene(entity.sceneId);
+				if (!currentScene) {
+					throw new Error(`AGENT_ACTION MOVE current scene not found: ${entity.sceneId}`);
+				}
+				const targetScene = this.sceneTree.getScene(action.target);
+				if (!targetScene) {
 					throw new Error(`AGENT_ACTION MOVE target scene not found: ${action.target}`);
 				}
-				this.entityStore.moveEntity(event.agentId, action.target);
+				const hasExit = currentScene.exits.some((e) => e.targetSceneId === action.target);
+				if (!hasExit) {
+					throw new Error(
+						`AGENT_ACTION MOVE no exit to target scene ${action.target} from ${entity.sceneId}`
+					);
+				}
+				this.moveEntity(event.agentId, action.target, action.target);
 			}
 			break;
 		}

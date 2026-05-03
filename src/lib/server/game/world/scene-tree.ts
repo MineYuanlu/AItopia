@@ -39,6 +39,9 @@ export class SceneTree {
 	}
 
 	createScene(name: string, type: SceneType, parentId: UUID | null = null, description = ''): Scene {
+		if (parentId && !this.scenes.has(parentId)) {
+			throw new Error(`Parent scene not found: ${parentId}`);
+		}
 		const scene: Scene = {
 			id: crypto.randomUUID(),
 			worldId: this.worldId,
@@ -110,6 +113,9 @@ export class SceneTree {
 	addExit(sceneId: UUID, exit: SceneExit): void {
 		const scene = this.scenes.get(sceneId);
 		if (!scene) throw new Error(`Scene not found: ${sceneId}`);
+		if (!this.scenes.has(exit.targetSceneId)) {
+			throw new Error(`Exit target scene not found: ${exit.targetSceneId}`);
+		}
 		// Remove existing exit in same direction if any
 		scene.exits = scene.exits.filter((e) => e.direction !== exit.direction);
 		scene.exits.push(exit);

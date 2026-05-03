@@ -120,7 +120,30 @@ export class NPCAgent extends Agent {
 				);
 				const { data } = await this.llm.chatJSON<ActionIntent>(request);
 				if (data.thought && data.action) {
-					return data;
+					// Validate action.type
+					const validActions = ['SPEAK', 'MOVE', 'WAIT', 'THINK', 'INTERACT'];
+					if (!validActions.includes(data.action.type)) {
+						console.warn(
+							`NPCAgent ${this.name} LLM returned invalid action type: ${data.action.type}, falling back to rules`
+						);
+						return this.selectWeightedBehavior(perception);
+					}
+
+					// Validate timeAdvanceSeconds
+					let timeAdvanceSeconds = 300;
+					if (typeof data.timeAdvanceSeconds === 'number' && !Number.isNaN(data.timeAdvanceSeconds)) {
+						timeAdvanceSeconds = Math.max(0, Math.min(data.timeAdvanceSeconds, 3600));
+					}
+
+					return {
+						thought: String(data.thought),
+						action: {
+							type: data.action.type as 'SPEAK' | 'MOVE' | 'WAIT' | 'THINK' | 'INTERACT',
+							target: data.action.target !== undefined ? String(data.action.target) : undefined,
+							content: data.action.content !== undefined ? String(data.action.content) : undefined
+						},
+						timeAdvanceSeconds
+					};
 				}
 			} catch (error) {
 				console.warn(`NPCAgent ${this.name} LLM decision failed, falling back to rules`);

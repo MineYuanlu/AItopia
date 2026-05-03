@@ -61,6 +61,7 @@ import { Scheduler } from '$lib/server/game/tick/scheduler';
 import { LLMClient } from '$lib/server/llm/client';
 import { AgentGenerator } from '$lib/server/game/agents/agent-generator';
 import { AgentFactory } from '$lib/server/game/agents/agent-factory';
+import { closeDb } from '$lib/server/db';
 import type { Agent } from '$lib/server/game/agents/agent';
 import type { GeneratedAgent } from '$lib/server/game/agents/agent-generator';
 
@@ -174,7 +175,13 @@ async function main(): Promise<{ world: WorldKernel }> {
 	console.log('');
 
 	// Initialize LLM client
-	const llm = new LLMClient();
+	let llm: LLMClient | undefined;
+	try {
+		llm = new LLMClient();
+	} catch (err) {
+		console.warn('⚠️ LLMClient init failed:', err instanceof Error ? err.message : String(err));
+		llm = undefined;
+	}
 
 	// Create world
 	console.log('🌍 Creating world...');
@@ -252,10 +259,20 @@ async function main(): Promise<{ world: WorldKernel }> {
 	// Setup graceful shutdown
 	let isRunning = true;
 	let shouldShutdown = false;
-	process.on('SIGINT', () => {
+	process.on('SIGINT', async () => {
 		console.log('\n\n🛑 SIGINT received, shutting down gracefully...');
 		shouldShutdown = true;
 		isRunning = false;
+		try {
+			await world.flush();
+			await world.saveSnapshot();
+			console.log('💾 Snapshot saved on shutdown');
+		} catch (e) {
+			console.error('Failed to save snapshot on shutdown:', e);
+		} finally {
+			closeDb();
+			process.exit(0);
+		}
 	});
 
 	// Main game loop
@@ -340,9 +357,12 @@ main()
 			console.log('💾 Snapshot saved');
 		} catch (e) {
 			console.error('Failed to save snapshot on exit:', e);
+		} finally {
+			closeDb();
 		}
 	})
 	.catch(async (err) => {
 		console.error('Fatal error:', err);
+		closeDb();
 		process.exit(1);
 	});

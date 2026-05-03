@@ -29,6 +29,17 @@ export interface LLMResponse {
 	finishReason?: string;
 }
 
+export class LLMJsonParseError extends Error {
+	constructor(
+		message: string,
+		public readonly content: string,
+		public readonly finishReason?: string
+	) {
+		super(message);
+		this.name = 'LLMJsonParseError';
+	}
+}
+
 interface OpenAIChatResponse {
 	id: string;
 	object: string;
@@ -92,6 +103,14 @@ export class LLMClient {
 		};
 		const timeoutMs = request.timeoutMs ?? this.defaultTimeoutMs;
 
+		// Increase max_tokens for agent generation prompts automatically
+		if (request.maxTokens === undefined) {
+			const systemPrompt = request.messages.find((m: LLMMessage) => m.role === 'system')?.content ?? '';
+			if (systemPrompt.includes('模拟人生') && systemPrompt.includes('玩家属性')) {
+				body.max_tokens = 4096;
+			}
+		}
+
 		const startTime = performance.now();
 		let lastError: Error | undefined;
 
@@ -113,8 +132,8 @@ export class LLMClient {
 				const responseText = await res.text();
 
 				if (!res.ok) {
-					// Retryable status codes: 429 (rate limit), 502 (bad gateway), 503 (service unavailable)
-					if (res.status === 429 || res.status === 502 || res.status === 503) {
+					// Retryable status codes: 429 (rate limit), 500 (internal error), 502 (bad gateway), 503 (service unavailable), 504 (gateway timeout)
+					if (res.status === 429 || res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) {
 						lastError = new Error(
 							`LLM API error: ${res.status} ${res.statusText}\nResponse: ${responseText}`
 						);
@@ -174,14 +193,16 @@ export class LLMClient {
 				return llmResponse;
 			} catch (err) {
 				clearTimeout(timer);
-				if (err instanceof TypeError && err.message.includes('fetch')) {
-					lastError = new Error(`LLM request failed: network error (${err.message})`);
+				if (err instanceof Error && err.name === 'AbortError') {
+					lastError = new Error(`LLM request timed out after ${timeoutMs}ms`);
 					const delay = Math.min(1000 * 2 ** attempt, 8000);
 					await sleep(delay);
 					continue;
 				}
-				if (err instanceof Error && err.name === 'AbortError') {
-					lastError = new Error(`LLM request timed out after ${timeoutMs}ms`);
+				if (err instanceof TypeError && err.message.includes('fetch')) {
+					lastError = new Error(`LLM request failed: network error (${err.message})`);
+					const delay = Math.min(1000 * 2 ** attempt, 8000);
+					await sleep(delay);
 					continue;
 				}
 				throw err;
@@ -203,19 +224,36 @@ export class LLMClient {
 
 		const response = await this.chat(jsonRequest);
 
+		let cleaned = response.content.trim();
+
+		// Remove markdown code fences
+		if (cleaned.startsWith('```')) {
+			cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+		}
+		cleaned = cleaned.trim();
+
+		// If still not looking like JSON, try regex extraction of first {...} or [...]
+		if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) {
+			const match = cleaned.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+			if (match) {
+				cleaned = match[1];
+			}
+		}
+
 		let data: T;
 		try {
-			// Handle potential markdown code fences
-			const cleaned = response.content
-				.replace(/^```json\s*/, '')
-				.replace(/```\s*$/, '')
-				.trim();
 			data = JSON.parse(cleaned) as T;
 		} catch (err) {
-			throw new Error(
-				`Failed to parse LLM response as JSON:\n` +
+			const hint =
+				response.finishReason === 'length'
+					? ' The response was truncated due to token limit (finishReason=length). Consider increasing maxTokens.'
+					: '';
+			throw new LLMJsonParseError(
+				`Failed to parse LLM response as JSON:${hint}\n` +
 					`Error: ${err instanceof Error ? err.message : String(err)}\n` +
-					`Content: ${response.content.slice(0, 1000)}`
+					`Cleaned content (${cleaned.length} chars): ${cleaned.slice(0, 1000)}`,
+				response.content,
+				response.finishReason
 			);
 		}
 

@@ -114,17 +114,27 @@ export class EventBus {
 	async flush(): Promise<void> {
 		if (this.pendingEvents.length === 0) return;
 
-		// Capture batch and immediately clear the queue
-		// to prevent events emitted during the await from being lost
+		// Capture batch by reference, but keep the original array alive
+		// until persistence succeeds. If it fails, we can safely restore.
 		const batch = this.pendingEvents;
-		this.pendingEvents = [];
+		const nextQueue: WorldEvent[] = [];
+
+		// Move any events that arrived during previous flush attempts
+		this.pendingEvents = nextQueue;
 
 		// Strip auto-generated fields before delegation to EventLog
 		const stripped = batch.map((ev) => {
 			const { id, createdAt, ...rest } = ev;
 			return rest;
 		});
-		await this.eventLog.appendMany(stripped);
+
+		try {
+			await this.eventLog.appendMany(stripped);
+		} catch (err) {
+			// Restore failed batch back to pendingEvents (prepend so order is preserved)
+			this.pendingEvents = batch.concat(this.pendingEvents);
+			throw err;
+		}
 	}
 
 	// Load events from DB for replay
@@ -132,7 +142,11 @@ export class EventBus {
 		return this.eventLog.replayEvents(sinceTick);
 	}
 
-	// Get recent events (for perception)
+	/**
+	 * Get recent events for perception/context building.
+	 * NOTE: This returns only un-flushed (in-memory) events.
+	 * For full persisted history, use eventLog.replayEvents().
+	 */
 	getRecentEvents(limit: number = 10): WorldEvent[] {
 		return this.pendingEvents.slice(-limit);
 	}

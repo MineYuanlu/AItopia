@@ -45,7 +45,7 @@ export class PlayerAgent extends Agent {
 			const timeAdvanceSeconds = Math.max(0, Math.min(data.timeAdvanceSeconds, 3600));
 
 			// Validate action.type is one of the allowed actions
-			const validActions = ['SPEAK', 'MOVE', 'WAIT', 'THINK'];
+			const validActions = ['SPEAK', 'MOVE', 'WAIT', 'THINK', 'INTERACT'];
 			if (!validActions.includes(data.action.type)) {
 				throw new Error(`Invalid action type from LLM: ${data.action.type}`);
 			}
@@ -53,7 +53,7 @@ export class PlayerAgent extends Agent {
 			return {
 				thought: String(data.thought),
 				action: {
-					type: data.action.type as 'SPEAK' | 'MOVE' | 'WAIT' | 'THINK',
+					type: data.action.type as 'SPEAK' | 'MOVE' | 'WAIT' | 'THINK' | 'INTERACT',
 					target: data.action.target !== undefined ? String(data.action.target) : undefined,
 					content: data.action.content !== undefined ? String(data.action.content) : undefined
 				},

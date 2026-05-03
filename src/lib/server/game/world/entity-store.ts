@@ -13,7 +13,7 @@ import type {
 	PersonalityComponent,
 	MemoryComponent,
 	RelationComponent,
-	PerceptionComponent
+	PerceptionComponent,
 } from '../types';
 
 /**
@@ -35,10 +35,7 @@ export class EntityStore {
 
 	async loadFromDB(): Promise<void> {
 		// Load all entities for this world
-		const rows = await db
-			.select()
-			.from(schema.entities)
-			.where(eq(schema.entities.worldId, this.worldId));
+		const rows = await db.select().from(schema.entities).where(eq(schema.entities.worldId, this.worldId));
 
 		for (const row of rows) {
 			const entity: Entity = {
@@ -46,26 +43,15 @@ export class EntityStore {
 				worldId: row.worldId,
 				sceneId: row.sceneId,
 				name: row.name,
-				type: row.type as EntityType
+				type: row.type as EntityType,
 			};
 			this.entities.set(entity.id, entity);
 		}
 
-		// Load all components for entities in this world
-		const componentRows = await db
-			.select()
-			.from(schema.components)
-			.where(eq(schema.components.entityId, schema.components.entityId))
-			// Need to join with entities to filter by worldId
-			.innerJoin(schema.entities, eq(schema.components.entityId, schema.entities.id));
-
 		// Re-query properly: get components by entity IDs
 		const entityIds = rows.map((r) => r.id);
 		if (entityIds.length > 0) {
-			const compRows = await db
-				.select()
-				.from(schema.components)
-				.where(inArray(schema.components.entityId, entityIds));
+			const compRows = await db.select().from(schema.components).where(inArray(schema.components.entityId, entityIds));
 
 			for (const row of compRows) {
 				const comp = this.deserializeComponent(row.type, row.data);
@@ -83,7 +69,7 @@ export class EntityStore {
 			worldId: this.worldId,
 			sceneId,
 			name,
-			type
+			type,
 		};
 		this.entities.set(entity.id, entity);
 		this.components.set(entity.id, []);
@@ -102,9 +88,11 @@ export class EntityStore {
 		this.dirty.delete(id);
 		this.dirtyComponents.delete(id);
 		// Also remove from DB (if already synced)
-		db.delete(schema.entities).where(eq(schema.entities.id, id)).catch(() => {
-			// Best-effort DB cleanup, ignore errors
-		});
+		db.delete(schema.entities)
+			.where(eq(schema.entities.id, id))
+			.catch(() => {
+				// Best-effort DB cleanup, ignore errors
+			});
 	}
 
 	moveEntity(entityId: UUID, targetSceneId: UUID): void {
@@ -131,10 +119,7 @@ export class EntityStore {
 		this.dirtyComponents.add(entityId);
 	}
 
-	getComponent<K extends keyof ComponentMap>(
-		entityId: UUID,
-		type: K
-	): ComponentMap[K] | undefined {
+	getComponent<K extends keyof ComponentMap>(entityId: UUID, type: K): ComponentMap[K] | undefined {
 		const list = this.components.get(entityId);
 		if (!list) return undefined;
 		return list.find((c) => c.type === type) as ComponentMap[K] | undefined;
@@ -179,9 +164,7 @@ export class EntityStore {
 		return Array.from(this.entities.values()).filter((e) => e.sceneId === sceneId);
 	}
 
-	queryByComponent<K extends keyof ComponentMap>(
-		type: K
-	): Array<{ entity: Entity; component: ComponentMap[K] }> {
+	queryByComponent<K extends keyof ComponentMap>(type: K): Array<{ entity: Entity; component: ComponentMap[K] }> {
 		const results: Array<{ entity: Entity; component: ComponentMap[K] }> = [];
 		for (const [entityId, list] of this.components) {
 			const comp = list.find((c) => c.type === type) as ComponentMap[K] | undefined;
@@ -196,69 +179,91 @@ export class EntityStore {
 	}
 
 	async syncToDB(): Promise<void> {
-		// Sync dirty entities
-		for (const entityId of this.dirty) {
-			const entity = this.entities.get(entityId);
-			if (!entity) continue;
+		// better-sqlite3 requires synchronous transaction callbacks
+		db.transaction((tx) => {
+			// Sync dirty entities
+			for (const entityId of this.dirty) {
+				const entity = this.entities.get(entityId);
+				if (!entity) continue;
 
-			// Upsert entity
-			await db
-				.insert(schema.entities)
-				.values({
-					id: entity.id,
-					worldId: entity.worldId,
-					sceneId: entity.sceneId,
-					name: entity.name,
-					type: entity.type
-				})
-				.onConflictDoUpdate({
-					target: schema.entities.id,
-					set: {
+				// Upsert entity
+				tx.insert(schema.entities)
+					.values({
+						id: entity.id,
+						worldId: entity.worldId,
 						sceneId: entity.sceneId,
 						name: entity.name,
-						type: entity.type
-					}
-				});
-		}
+						type: entity.type,
+					})
+					.onConflictDoUpdate({
+						target: schema.entities.id,
+						set: {
+							sceneId: entity.sceneId,
+							name: entity.name,
+							type: entity.type,
+						},
+					})
+					.run();
+			}
 
-		// Sync dirty components: delete all, then re-insert
-		for (const entityId of this.dirtyComponents) {
-			const list = this.components.get(entityId);
-			// Delete existing components for this entity
-			await db.delete(schema.components).where(eq(schema.components.entityId, entityId));
-			if (list && list.length > 0) {
-				for (const comp of list) {
-					const serialized = this.serializeComponent(comp);
-					await db.insert(schema.components).values({
-						id: crypto.randomUUID(),
-						entityId,
-						type: comp.type,
-						data: serialized
-					});
+			// Sync dirty components: delete all, then re-insert
+			for (const entityId of this.dirtyComponents) {
+				const list = this.components.get(entityId);
+				// Delete existing components for this entity
+				tx.delete(schema.components).where(eq(schema.components.entityId, entityId)).run();
+				if (list && list.length > 0) {
+					for (const comp of list) {
+						const serialized = this.serializeComponent(comp);
+						tx.insert(schema.components)
+							.values({
+								id: crypto.randomUUID(),
+								entityId,
+								type: comp.type,
+								data: serialized,
+							})
+							.run();
+					}
 				}
 			}
-		}
+		});
 
 		this.dirty.clear();
 		this.dirtyComponents.clear();
 	}
 
 	private deserializeComponent(type: string, data: unknown): Component | null {
-		switch (type) {
+		if (!data || typeof data !== 'object') {
+			console.warn(`deserializeComponent: invalid data for type ${type}`);
+			return null;
+		}
+		// Basic structural validation
+		const d = data as Component;
+		if (!('type' in d) || d.type !== type) {
+			console.warn(`deserializeComponent: type mismatch (expected ${type}, got ${d.type})`);
+			return null;
+		}
+		switch (d.type) {
 			case 'Position':
-				return data as PositionComponent;
+				if (!('sceneId' in d)) return null;
+				return d;
 			case 'Stats':
-				return data as StatsComponent;
+				if (!('energy' in d) || !('health' in d)) return null;
+				return d;
 			case 'Inventory':
-				return data as InventoryComponent;
+				if (!('items' in d)) return null;
+				return d;
 			case 'Personality':
-				return data as PersonalityComponent;
+				if (!('traits' in d)) return null;
+				return d;
 			case 'Memory':
-				return data as MemoryComponent;
+				if (!('chunks' in d)) return null;
+				return d;
 			case 'Relation':
-				return data as RelationComponent;
+				if (!('relations' in d)) return null;
+				return d;
 			case 'Perception':
-				return data as PerceptionComponent;
+				if (!('visibleEntities' in d)) return null;
+				return d;
 			default:
 				return null;
 		}

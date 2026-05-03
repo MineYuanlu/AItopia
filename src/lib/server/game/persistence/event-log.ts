@@ -24,13 +24,18 @@ export class EventLog {
 			createdAt: Date.now()
 		};
 
-		await db.insert(schema.events).values({
-			id: fullEvent.id,
-			worldId: fullEvent.worldId,
-			tickTime: fullEvent.tickTime,
-			type: fullEvent.type,
-			agentId: fullEvent.agentId,
-			data: fullEvent.data
+		// better-sqlite3 requires synchronous transaction callbacks
+		db.transaction((tx) => {
+			tx.insert(schema.events)
+				.values({
+					id: fullEvent.id,
+					worldId: fullEvent.worldId,
+					tickTime: fullEvent.tickTime,
+					type: fullEvent.type,
+					agentId: fullEvent.agentId,
+					data: fullEvent.data
+				})
+				.run();
 		});
 
 		return fullEvent;
@@ -49,16 +54,21 @@ export class EventLog {
 		}));
 
 		// SQLite via Drizzle supports batch insert via values(array)
-		await db.insert(schema.events).values(
-			fullEvents.map((event) => ({
-				id: event.id,
-				worldId: event.worldId,
-				tickTime: event.tickTime,
-				type: event.type,
-				agentId: event.agentId,
-				data: event.data
-			}))
-		);
+		// better-sqlite3 requires synchronous transaction callbacks
+		db.transaction((tx) => {
+			tx.insert(schema.events)
+				.values(
+					fullEvents.map((event) => ({
+						id: event.id,
+						worldId: event.worldId,
+						tickTime: event.tickTime,
+						type: event.type,
+						agentId: event.agentId,
+						data: event.data
+					}))
+				)
+				.run();
+		});
 
 		return fullEvents;
 	}

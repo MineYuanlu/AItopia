@@ -46,11 +46,11 @@ describe('LLMClient', () => {
 			});
 
 			return client.chat({ messages: [{ role: 'user', content: 'Hi' }] }).then(() => {
-				const call = mockFetch.mock.calls[0];
-				expect(call[0]).toBe('https://custom.api.com/v1/chat/completions');
-				expect(call[1].headers.Authorization).toBe('Bearer custom-key');
-				const body = JSON.parse(call[1].body);
-				expect(body.model).toBe('custom-model');
+			const call = mockFetch.mock.calls.at(-1)!;
+			expect(call[0]).toBe('https://custom.api.com/v1/chat/completions');
+			expect(call[1].headers.Authorization).toBe('Bearer custom-key');
+			const body = JSON.parse(call[1].body);
+			expect(body.model).toBe('custom-model');
 			});
 		});
 
@@ -66,36 +66,7 @@ describe('LLMClient', () => {
 			delete process.env.LLM_MODEL;
 
 			// Need to create client AFTER clearing env
-			const defaultClient = new LLMClient();
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				status: 200,
-				statusText: 'OK',
-				text: async () =>
-					JSON.stringify({
-						id: '1',
-						object: 'chat.completion',
-						created: 1234567890,
-						model: 'Kimi-K2.6',
-						choices: [
-							{
-								index: 0,
-								message: { role: 'assistant', content: 'Hello' },
-								finish_reason: 'stop'
-							}
-						],
-						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
-					})
-			});
-
-			await defaultClient.chat({ messages: [{ role: 'user', content: 'Hi' }] });
-
-		const call = mockFetch.mock.calls.at(-1)!;
-		expect(call[0]).toBe('https://api-ad-ops-prod-advibe.nioint.com/v1/chat/completions');
-		expect(call[1].headers.Authorization).toBe('Bearer ');
-		const body = JSON.parse(call[1].body);
-			expect(body.model).toBe('Kimi-K2.6');
+			expect(() => new LLMClient()).toThrow('apiBase is required');
 
 			// Restore env
 			if (originalBase !== undefined) process.env.LLM_API_BASE = originalBase;
@@ -153,7 +124,7 @@ describe('LLMClient', () => {
 
 	describe('chat', () => {
 		it('should send correct request body', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
@@ -201,8 +172,44 @@ describe('LLMClient', () => {
 			expect(body.response_format).toEqual({ type: 'json_object' });
 		});
 
+		it('should send agent generation prompt with higher max_tokens', async () => {
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
+
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				statusText: 'OK',
+				text: async () =>
+					JSON.stringify({
+						id: '1',
+						object: 'chat.completion',
+						created: 1234567890,
+						model: 'test-model',
+						choices: [
+							{
+								index: 0,
+								message: { role: 'assistant', content: 'Hi' },
+								finish_reason: 'stop'
+							}
+						],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+					})
+			});
+
+			await client.chat({
+				messages: [
+					{ role: 'system', content: '用户正在创建《模拟人生》游戏的玩家属性设置。你需要根据用户输入的信息，随机给出符合用户设定要求的玩家属性' },
+					{ role: 'user', content: 'test' }
+				]
+			});
+
+			const call = mockFetch.mock.calls.at(-1)!;
+			const body = JSON.parse(call[1].body);
+			expect(body.max_tokens).toBe(4096);
+		});
+
 		it('should use default temperature and maxTokens when not provided', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
@@ -234,7 +241,7 @@ describe('LLMClient', () => {
 		});
 
 		it('should throw on API error', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: false,
@@ -249,17 +256,21 @@ describe('LLMClient', () => {
 		});
 
 		it('should throw on network error', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			vi.useRealTimers();
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
+			mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
+			mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
 			mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
 
 			await expect(client.chat({ messages: [{ role: 'user', content: 'Hi' }] })).rejects.toThrow(
 				'network error'
 			);
-		});
+			vi.useFakeTimers();
+		}, 60_000);
 
 		it('should throw on invalid JSON response', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
@@ -276,7 +287,7 @@ describe('LLMClient', () => {
 
 	describe('chatJSON', () => {
 		it('should parse valid JSON response', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
@@ -309,7 +320,7 @@ describe('LLMClient', () => {
 		});
 
 		it('should strip markdown code fences', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: true,
@@ -343,7 +354,7 @@ describe('LLMClient', () => {
 		});
 
 		it('should throw on malformed JSON', async () => {
-			const client = new LLMClient({ apiKey: 'test-key' });
+			const client = new LLMClient({ apiBase: 'https://test.api.com/v1', apiKey: 'test-key', model: 'test-model' });
 
 			mockFetch.mockResolvedValueOnce({
 				ok: true,

@@ -1,7 +1,7 @@
 /**
  * Agent Factory — creates agents from generated data and registers them in the world.
  */
-import type { UUID } from '../types';
+import type { UUID, Component } from '../types';
 import type { WorldKernel } from '../world/world-kernel';
 import { LLMClient } from '../../llm/client';
 import type { GeneratedAgent, AgentGenerationResult } from './agent-generator';
@@ -21,12 +21,14 @@ export class AgentFactory {
 	): PlayerAgent {
 		// 1. Create entity in world
 		const entity = worldKernel.createAgent(generated.名称, sceneId, true);
+		const addedComponents: Component[] = [];
 
 		try {
 			// 2. Add components from generated data
 			const components = AgentGenerator.toComponents(generated);
 			for (const component of components) {
 				worldKernel.entityStore.addComponent(entity.id, component);
+				addedComponents.push(component);
 			}
 
 			// 3. Create PlayerAgent instance
@@ -39,7 +41,14 @@ export class AgentFactory {
 				llm
 			});
 		} catch (error) {
-			// Cleanup on failure: remove the created entity and its components
+			// Cleanup on failure: remove the created entity and any components we added
+			for (const component of addedComponents) {
+				try {
+					worldKernel.entityStore.removeComponent(entity.id, component.type);
+				} catch {
+					// Best-effort cleanup
+				}
+			}
 			try {
 				worldKernel.entityStore.removeEntity(entity.id);
 			} catch {
@@ -61,11 +70,13 @@ export class AgentFactory {
 	): NPCAgent {
 		// Similar to createPlayer but creates NPCAgent
 		const entity = worldKernel.createAgent(generated.名称, sceneId, false);
+		const addedComponents: Component[] = [];
 
 		try {
 			const components = AgentGenerator.toComponents(generated);
 			for (const component of components) {
 				worldKernel.entityStore.addComponent(entity.id, component);
+				addedComponents.push(component);
 			}
 
 			return new NPCAgent({
@@ -78,6 +89,13 @@ export class AgentFactory {
 				seed
 			});
 		} catch (error) {
+			for (const component of addedComponents) {
+				try {
+					worldKernel.entityStore.removeComponent(entity.id, component.type);
+				} catch {
+					// Best-effort cleanup
+				}
+			}
 			try {
 				worldKernel.entityStore.removeEntity(entity.id);
 			} catch {

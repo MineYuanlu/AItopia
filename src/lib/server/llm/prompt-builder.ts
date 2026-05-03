@@ -141,7 +141,7 @@ export class PromptBuilder {
 				{ role: 'user', content: userContent }
 			],
 			model: undefined,
-			temperature: 0.9,
+			temperature: 2,
 			responseFormat: { type: 'json_object' }
 		};
 	}
@@ -184,9 +184,9 @@ export class PromptBuilder {
 				{
 					thought: '内心独白和思考过程',
 					action: {
-						type: 'SPEAK | MOVE | WAIT | THINK',
-						target: '行动目标（说话对象、移动目的地等，可选）',
-						content: '具体内容（说的话、移动方向等，可选）'
+						type: 'SPEAK',
+						target: '张三',
+						content: '你好！'
 					},
 					timeAdvanceSeconds: 300
 				},
@@ -195,10 +195,11 @@ export class PromptBuilder {
 			),
 			'',
 			'注意：',
-			'- action.type 必须是以下四种之一：SPEAK（说话）、MOVE（移动）、WAIT（等待）、THINK（思考）。',
+			'- action.type 必须是以下五种之一：SPEAK（说话）、MOVE（移动）、WAIT（等待）、THINK（思考）、INTERACT（与物品交互）。',
 			'- MOVE 时，target 必须是当前场景存在的出口方向。',
 			'- SPEAK 时，content 为你所说的话，target（可选）为说话对象的名字。',
 			'- THINK 时，content 为你的思考内容。',
+			'- INTERACT 时，target 为物品名称，content（可选）为交互方式。',
 			'- WAIT 不需要 target 或 content。',
 			'- timeAdvanceSeconds 表示此动作预计耗时（秒），取值范围 0 到 3600。'
 		].join('\n');
@@ -218,18 +219,24 @@ export class PromptBuilder {
 	 * Format an AgentPerception into human-readable text.
 	 */
 	static formatPerception(perception: AgentPerception): string {
+		// Defensive: handle null/undefined perception gracefully
+		if (!perception) {
+			return '（无法获取当前环境信息）';
+		}
 		const lines: string[] = [];
 
 		// Scene
-		lines.push(`场景: ${perception.currentScene.name}`);
-		lines.push(`  ${perception.currentScene.description}`);
+		const scene = perception.currentScene;
+		lines.push(`场景: ${scene?.name ?? '（未知）'}`);
+		lines.push(`  ${scene?.description ?? ''}`);
 		lines.push('');
 
 		// Visible people
-		if (perception.visibleAgents.length > 0) {
+		const visibleAgents = perception.visibleAgents ?? [];
+		if (visibleAgents.length > 0) {
 			lines.push('在场的人:');
-			for (const a of perception.visibleAgents) {
-				lines.push(`  - ${a.name} (${a.type === 'player' ? '玩家' : 'NPC'})`);
+			for (const a of visibleAgents) {
+				lines.push(`  - ${a?.name ?? '（未知）'} (${a?.type === 'player' ? '玩家' : 'NPC'})`);
 			}
 		} else {
 			lines.push('在场的人: （无）');
@@ -237,10 +244,11 @@ export class PromptBuilder {
 		lines.push('');
 
 		// Visible items
-		if (perception.visibleItems.length > 0) {
+		const visibleItems = perception.visibleItems ?? [];
+		if (visibleItems.length > 0) {
 			lines.push('可见物品:');
-			for (const item of perception.visibleItems) {
-				lines.push(`  - ${item.name}`);
+			for (const item of visibleItems) {
+				lines.push(`  - ${item?.name ?? '（未知）'}`);
 			}
 		} else {
 			lines.push('可见物品: （无）');
@@ -248,10 +256,11 @@ export class PromptBuilder {
 		lines.push('');
 
 		// Recent events
-		if (perception.recentEvents.length > 0) {
+		const recentEvents = perception.recentEvents ?? [];
+		if (recentEvents.length > 0) {
 			lines.push('最近发生的事:');
-			for (const ev of perception.recentEvents.slice(-5)) {
-				lines.push(`  [T+${ev.tickTime}s] ${ev.type}: ${JSON.stringify(ev.data).slice(0, 100)}`);
+			for (const ev of recentEvents.slice(-5)) {
+				lines.push(`  [T+${ev?.tickTime ?? 0}s] ${ev?.type ?? 'EVENT'}: ${JSON.stringify(ev?.data).slice(0, 100)}`);
 			}
 		} else {
 			lines.push('最近发生的事: （无）');
@@ -259,17 +268,27 @@ export class PromptBuilder {
 		lines.push('');
 
 		// Self state
-		const { name, stats, memory } = perception.selfState;
-		lines.push(`自身状态 —— ${name}`);
-		lines.push(`  体力: ${stats.energy}/${stats.maxEnergy}`);
-		lines.push(`  生命: ${stats.health}/${stats.maxHealth}`);
-		if (memory.length > 0) {
-			lines.push('  近期记忆:');
-			for (const m of memory.slice(-3)) {
-				lines.push(`    - ${m.content.slice(0, 80)}`);
+		const self = perception.selfState;
+		if (self) {
+			const { name, stats, memory } = self;
+			lines.push(`自身状态 —— ${name ?? '（未知）'}`);
+			const energy = stats?.energy ?? 0;
+			const maxEnergy = stats?.maxEnergy ?? 0;
+			const health = stats?.health ?? 0;
+			const maxHealth = stats?.maxHealth ?? 0;
+			lines.push(`  体力: ${energy}/${maxEnergy}`);
+			lines.push(`  生命: ${health}/${maxHealth}`);
+			const memoryArr = memory ?? [];
+			if (memoryArr.length > 0) {
+				lines.push('  近期记忆:');
+				for (const m of memoryArr.slice(-3)) {
+					lines.push(`    - ${m?.content?.slice(0, 80) ?? ''}`);
+				}
+			} else {
+				lines.push('  近期记忆: （无）');
 			}
 		} else {
-			lines.push('  近期记忆: （无）');
+			lines.push('自身状态: （无法获取）');
 		}
 
 		return lines.join('\n');
