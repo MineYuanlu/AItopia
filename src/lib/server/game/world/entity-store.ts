@@ -255,9 +255,9 @@ export class EntityStore {
 			case 'Personality':
 				if (!('traits' in d)) return null;
 				return d;
-			case 'Memory':
-				if (!('chunks' in d)) return null;
-				return d;
+		case 'Memory':
+			if (!('shortTerm' in d) || !('longTerm' in d)) return null;
+			return d;
 			case 'Relation':
 				if (!('relations' in d)) return null;
 				return d;

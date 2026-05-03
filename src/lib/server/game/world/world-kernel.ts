@@ -134,6 +134,23 @@ export class WorldKernel {
 
 	advanceTime(seconds: number): void {
 		this.currentTime += seconds;
+
+		// Apply natural energy decay for all agents based on elapsed time
+		// Base decay: 1 energy per minute of activity
+		const energyDecay = Math.floor(seconds / 60);
+		if (energyDecay > 0) {
+			const agents = this.entityStore.queryByComponent('Stats');
+			for (const { entity, component: stats } of agents) {
+				if (entity.type === 'player' || entity.type === 'npc') {
+					const newEnergy = Math.max(0, stats.energy - energyDecay);
+					if (newEnergy !== stats.energy) {
+						stats.energy = newEnergy;
+						this.entityStore.addComponent(entity.id, stats);
+					}
+				}
+			}
+		}
+
 		this.eventBus.emit({
 			type: 'TIME_ADVANCE',
 			tickTime: this.currentTime,
@@ -378,17 +395,55 @@ export class WorldKernel {
 				if (!currentScene) {
 					throw new Error(`AGENT_ACTION MOVE current scene not found: ${entity.sceneId}`);
 				}
-				const targetScene = this.sceneTree.getScene(action.target);
-				if (!targetScene) {
-					throw new Error(`AGENT_ACTION MOVE target scene not found: ${action.target}`);
+				// If target is a direction, resolve to sceneId
+				let targetSceneId = action.target;
+				const exit = currentScene.exits.find((e) => e.direction === action.target);
+				if (exit) {
+					targetSceneId = exit.targetSceneId;
 				}
-				const hasExit = currentScene.exits.some((e) => e.targetSceneId === action.target);
+				const targetScene = this.sceneTree.getScene(targetSceneId);
+				if (!targetScene) {
+					throw new Error(`AGENT_ACTION MOVE target scene not found: ${targetSceneId}`);
+				}
+				const hasExit = currentScene.exits.some((e) => e.targetSceneId === targetSceneId);
 				if (!hasExit) {
 					throw new Error(
-						`AGENT_ACTION MOVE no exit to target scene ${action.target} from ${entity.sceneId}`
+						`AGENT_ACTION MOVE no exit to target scene ${targetSceneId} from ${entity.sceneId}`
 					);
 				}
-				this.moveEntity(event.agentId, action.target, action.target);
+				this.moveEntity(event.agentId, targetSceneId, action.target);
+			} else if (action.type === 'SPEAK' && event.agentId) {
+				// SPEAK already emitted by agentSpeak convenience method; 
+				// here we just ensure the speech is recorded in the agent's memory
+				const memory = this.entityStore.getComponent(event.agentId, 'Memory');
+				if (memory && action.content) {
+					memory.shortTerm.push({
+						id: crypto.randomUUID(),
+						content: `我说: "${action.content}"`,
+						timestamp: this.currentTime,
+						importance: 4
+					});
+					// Keep short-term memory bounded
+					if (memory.shortTerm.length > 20) {
+						memory.shortTerm.shift();
+					}
+					this.entityStore.addComponent(event.agentId, memory);
+				}
+			} else if (action.type === 'INTERACT' && event.agentId) {
+				// Record interaction in agent's memory
+				const memory = this.entityStore.getComponent(event.agentId, 'Memory');
+				if (memory && action.target) {
+					memory.shortTerm.push({
+						id: crypto.randomUUID(),
+						content: `我与 ${action.target} 互动${action.content ? ': ' + action.content : ''}`,
+						timestamp: this.currentTime,
+						importance: 5
+					});
+					if (memory.shortTerm.length > 20) {
+						memory.shortTerm.shift();
+					}
+					this.entityStore.addComponent(event.agentId, memory);
+				}
 			}
 			break;
 		}

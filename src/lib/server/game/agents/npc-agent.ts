@@ -80,7 +80,7 @@ export class NPCAgent extends Agent {
 				weight: 0.1,
 				action: () => {
 					// Try to move (if there are exits)
-					// For MVP, target is a sceneId or direction string
+					// For MVP, we pick a random direction and the validator/executor will resolve it
 					const dirs = ['north', 'south', 'east', 'west'];
 					const dir = dirs[Math.floor(this.rng() * dirs.length)];
 					return {

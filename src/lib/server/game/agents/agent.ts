@@ -81,13 +81,31 @@ export abstract class Agent {
 			case 'MOVE':
 				if (action.target) {
 					try {
-						this.kernel.moveEntity(this.entityId, action.target);
-					} catch (err) {
-						console.error(`Agent ${this.name} MOVE failed:`, err);
-						success = false;
+						// If target is a direction (not a UUID), resolve it via scene exits
+						let targetSceneId = action.target;
+						// Attempt to resolve direction to sceneId via kernel's entityStore/sceneTree
+						const entityStore = (this.kernel as unknown as Record<string, unknown>)['entityStore'];
+						const sceneTree = (this.kernel as unknown as Record<string, unknown>)['sceneTree'];
+						if (entityStore && typeof (entityStore as { getEntity: (id: string) => unknown }).getEntity === 'function' &&
+						    sceneTree && typeof (sceneTree as { getScene: (id: string) => unknown }).getScene === 'function') {
+						const entity = (entityStore as { getEntity: (id: string) => { sceneId: string } | undefined }).getEntity(this.entityId);
+						if (entity) {
+							const currentScene = (sceneTree as { getScene: (id: string) => { exits: Array<{ direction: string; targetSceneId: string }> } | undefined }).getScene(entity.sceneId);
+							if (currentScene && currentScene.exits) {
+								const exit = currentScene.exits.find((e) => e.direction === action.target);
+								if (exit) {
+									targetSceneId = exit.targetSceneId;
+								}
+							}
+						}
 					}
+					this.kernel.moveEntity(this.entityId, targetSceneId);
+				} catch (err) {
+					console.error(`Agent ${this.name} MOVE failed:`, err);
+					success = false;
 				}
-				break;
+			}
+			break;
 			case 'INTERACT':
 				if (action.target) {
 					try {

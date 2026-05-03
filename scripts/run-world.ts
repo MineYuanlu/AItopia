@@ -250,6 +250,17 @@ async function main(): Promise<{ world: WorldKernel }> {
 			console.log(`[${time}] ${agentName} moved to ${dest}`);
 		} else if (event.type === 'TIME_ADVANCE') {
 			console.log(`[${time}] ⏰ Time advanced by ${event.data.advancedBy}s`);
+			// Show agent energy levels periodically
+			const advancedBy = event.data.advancedBy as number;
+			if (advancedBy >= 60) {
+				const energyInfo = agents
+					.map((a) => {
+						const stats = world.entityStore.getComponent(a.getEntityId(), 'Stats');
+						return `${a.getName()}:${stats?.energy ?? '?'}`;
+					})
+					.join(' ');
+				console.log(`[${time}] ⚡ Energy: ${energyInfo}`);
+			}
 		} else if (event.type === 'AGENT_ACTION' && (event.data.action as { type: string } | undefined)?.type === 'WAIT') {
 			// Don't print WAIT actions to keep output clean
 		}

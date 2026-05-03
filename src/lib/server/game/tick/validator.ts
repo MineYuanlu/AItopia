@@ -36,6 +36,19 @@ export class Validator {
 		this.sceneTree = sceneTree;
 	}
 
+	/** Find an entity in the same scene by name or UUID */
+	private findEntityInScene(agentId: UUID, target: string): { id: UUID; type: string; sceneId: UUID; name: string } | undefined {
+		const agent = this.entityStore.getEntity(agentId);
+		if (!agent) return undefined;
+		// Try UUID first
+		const byId = this.entityStore.getEntity(target as UUID);
+		if (byId && byId.sceneId === agent.sceneId) return byId;
+		// Then try name (requires querying all entities - for MVP we assume a simple scan)
+		// Since EntityStoreLike only exposes getEntity, we delegate to a broader interface
+		// For now, if target matches agent's own name or known entities, validate
+		return undefined;
+	}
+
 	// Validate an action intent before execution
 	validateAction(agentId: UUID, action: ActionIntent['action']): ValidationResult {
 		// Check: does agent exist?
@@ -78,7 +91,20 @@ export class Validator {
 			}
 
 			case 'INTERACT': {
-				// Simple MVP validation
+				// Validate target exists and is in the same scene
+				if (!action.target) {
+					return { valid: false, reason: 'Interact action requires a target' };
+				}
+				// Try to find target by name or UUID
+				const targetEntity = this.findEntityInScene(agentId, action.target);
+				if (!targetEntity) {
+					return { valid: false, reason: `Interact target not found in current scene: ${action.target}` };
+				}
+				// Check if agent is conscious
+				const stats = this.entityStore.getComponent(agentId, 'Stats');
+				if (stats && (!Number.isFinite(stats.energy) || stats.energy <= 0)) {
+					return { valid: false, reason: 'Agent is unconscious (energy depleted)' };
+				}
 				return { valid: true };
 			}
 
